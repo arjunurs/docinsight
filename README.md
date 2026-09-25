@@ -50,7 +50,7 @@ When a user asks a question:
 
 1. Clone this repository:
    ```
-   git clone <repository-url>
+   git clone https://github.com/arjunurs/docinsight.git
    cd docinsight
    ```
 
@@ -71,7 +71,7 @@ When a user asks a question:
 
 1. Clone this repository:
    ```
-   git clone <repository-url>
+   git clone https://github.com/arjunurs/docinsight.git
    cd docinsight
    ```
 
