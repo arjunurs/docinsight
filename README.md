@@ -65,27 +65,33 @@ Faithfulness runs the app's own `QueryEngine` (top 3, `compact` mode) over a see
 
 ### Baseline results
 
-Full corpus (48 documents, 772 chunks), all 10,570 questions, seed 13. Run on 2026-10-09 against the app **before** the ingestion and config fixes in #2 (double chunking, duplicates on re-upload, unused `.env` settings, answer temperature 0.7, now 0.0). Re-run to measure their effect.
+Full corpus (48 documents, 772 chunks), all 10,570 questions, seed 13, run on 2026-10-09 both before and after the ingestion and config fixes in #2 (single-pass chunking, content-hash dedup, settings read from `.env`, answer temperature 0.7 to 0.0).
+
+Retrieval was identical to three decimals before and after the fixes (the harness always chunked once on a fresh index), so one table covers both:
 
 | Retriever | recall@1 | recall@3 | recall@5 | recall@10 | MRR@10 |
 |---|---|---|---|---|---|
 | bm25 | 0.774 | **0.910** | **0.943** | 0.970 | **0.847** |
-| dense (app default) | 0.542 | 0.772 | 0.844 | 0.917 | 0.672 |
-| hybrid (RRF) | 0.700 | 0.891 | 0.938 | **0.977** | 0.802 |
+| dense (app default) | 0.543 | 0.772 | 0.844 | 0.917 | 0.672 |
+| hybrid (RRF) | 0.700 | 0.891 | 0.938 | **0.977** | 0.803 |
 
-Answer quality, 100 sampled questions through the app's `QueryEngine` (dense, top 3, `gpt-4o-mini` at 0.7, judged by `gpt-4o-mini`):
+Answer quality, 100 sampled questions through the app's `QueryEngine` (dense, top 3, `gpt-4o-mini`, judged by `gpt-4o-mini`):
 
-| Faithfulness | Fully faithful answers | Answers with no claims | Answer recall | Context has answer |
-|---|---|---|---|---|
-| 0.960 | 95.5% | 12 / 100 | 0.67 | 0.72 |
+| Run | Faithfulness | Fully faithful | No-claim answers | Answer recall | Context has answer |
+|---|---|---|---|---|---|
+| Before #2 (temperature 0.7) | 0.960 | 95.5% | 12 / 100 | 0.67 | 0.72 |
+| After #2 (temperature 0.0) | 0.949 | 94.3% | 12 / 100 | 0.67 | 0.73 |
+
+The differences between runs are within noise for n = 100.
 
 What the numbers say:
 
-- **Retrieval is the bottleneck, not generation.** Only 72% of answers had the gold answer in their top 3 chunks, and answer recall (0.67) sits just under that ceiling. Answers are almost always grounded in what was retrieved; they are wrong mostly because the right chunk was not retrieved.
-- **The app's dense retriever is the weakest of the three on this data.** Switching the app to hybrid retrieval raises recall@3 from 0.772 to 0.891 for about 0.4 ms more per query. Part of that gap is SQuAD's lexical bias (see caveats), so confirm on less lexical questions before treating BM25 as the winner on its own.
-- **Unfaithful answers came from retrieval misses.** Of the three answers scored 0.0, two were answered from the model's own knowledge after retrieval missed: one wrong ("24 points" instead of 308) and one right but ungrounded ("Virgin Media"). The third looks like a judge false negative, since the gold answer was in the retrieved context.
+- **Retrieval is the bottleneck, not generation.** Only about 72% of answers had the gold answer in their top 3 chunks, and answer recall (0.67) sits just under that ceiling. Answers are wrong mostly because the right chunk was not retrieved.
+- **The app's dense retriever is the weakest of the three on this data.** Switching to hybrid retrieval raises recall@3 from 0.772 to 0.891 for about 0.3 ms more per query. Part of that gap is SQuAD's lexical bias (see caveats), so confirm on less lexical questions before treating BM25 as the winner on its own.
+- **Every unfaithful answer after the fixes came from a retrieval miss.** All four answers scored 0.0 had no gold chunk in context; the model fell back on its own knowledge, sometimes correctly (1906, Sufism) and sometimes not ("24 points" instead of 308, "Pierre Bayle" instead of Andrew Lortie). An answer prompt that says "reply that you don't know when the context lacks the answer" is the obvious next change to measure.
+- **The judge is noisy at the edges.** Before the fixes it marked one correct, in-context answer unsupported; after, it split one fact into two claims and graded them differently. Treat single-example scores with care and compare aggregate runs.
 
-Raw output lives in [`evaluation/results/`](evaluation/results/): `bm25_baseline.json` (offline run) and `baseline.json` (full run). A full run costs well under $1 (about 0.5M embedding tokens plus 200 `gpt-4o-mini` calls).
+Raw output lives in [`evaluation/results/`](evaluation/results/): `bm25_baseline.json` (offline run), `baseline.json` (before #2) and `baseline_postfix.json` (after #2). A full run costs well under $1 (about 0.5M embedding tokens plus 200 `gpt-4o-mini` calls).
 
 ### Running it
 
@@ -105,7 +111,7 @@ python -m evaluation.run --retrievers bm25,dense,hybrid --faithfulness 100 \
 
 - SQuAD questions were written by annotators looking at the paragraph, so they share many words with it. That favors BM25, and absolute recall here will be higher than on real user questions. Use the numbers to compare variants, not as a production estimate.
 - The judge defaults to the same model that writes the answers, which can inflate faithfulness. Pass a different `--judge-model` for a stricter check.
-- The harness chunks once and builds a fresh index per run, so it never measured the double chunking or re-upload duplicates fixed in #2. The baseline's answer quality does reflect the old temperature of 0.7.
+- The harness chunks once and builds a fresh index per run, so it never measured the double chunking or re-upload duplicates fixed in #2; that is why retrieval numbers did not move.
 
 ## Getting Started
 
