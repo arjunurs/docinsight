@@ -65,7 +65,7 @@ Faithfulness runs the app's own `QueryEngine` (top 3, `compact` mode, `gpt-4o-mi
 
 ### Baseline results
 
-Full corpus (48 documents, 772 chunks), all 10,570 questions, seed 13. Run on 2026-10-09.
+Full corpus (48 documents, 772 chunks), all 10,570 questions, seed 13. Run on 2026-10-09, **before** the fixes for the app issues listed under Caveats (double chunking, duplicates on re-upload, unused `.env` settings, temperature 0.7). Re-run after those fixes land to measure their effect.
 
 | Retriever | recall@1 | recall@3 | recall@5 | recall@10 | MRR@10 |
 |---|---|---|---|---|---|
