@@ -8,6 +8,7 @@ from typing import List
 import streamlit as st
 from dotenv import load_dotenv
 
+from utils.config import AppConfig
 from utils.document_processor import DocumentProcessor
 from utils.index_manager import IndexManager
 from utils.query_engine import QueryEngine
@@ -29,14 +30,26 @@ The system uses LlamaIndex and the OpenAI API to provide relevant answers based 
 """)
 
 # Initialize session state
+config = AppConfig.from_env()
 if "processor" not in st.session_state:
-    st.session_state.processor = DocumentProcessor()
+    st.session_state.processor = DocumentProcessor(
+        chunk_size=config.chunk_size,
+        chunk_overlap=config.chunk_overlap
+    )
 if "index_manager" not in st.session_state:
-    st.session_state.index_manager = IndexManager()
+    st.session_state.index_manager = IndexManager(
+        persist_dir=config.persist_dir,
+        collection_name=config.collection_name,
+        embedding_model=config.embedding_model,
+        llm_model=config.llm_model,
+        temperature=config.llm_temperature
+    )
 if "query_engine" not in st.session_state:
-    st.session_state.query_engine = QueryEngine()
+    # The index manager reattaches to the persisted collection, so previously
+    # processed documents are queryable right after a restart
+    st.session_state.query_engine = QueryEngine(st.session_state.index_manager.get_index())
 if "documents_processed" not in st.session_state:
-    st.session_state.documents_processed = False
+    st.session_state.documents_processed = st.session_state.index_manager.has_documents()
 
 # File upload section
 st.header("Upload Documents")
@@ -65,20 +78,20 @@ if uploaded_files and st.button("Process Documents"):
         # Save uploaded files
         file_paths = save_uploaded_files(uploaded_files)
         
-        # Load and process documents
+        # Load and chunk documents
         documents = st.session_state.processor.load_documents(file_paths)
-        processed_documents = st.session_state.processor.process_documents(documents)
+        nodes = st.session_state.processor.process_documents(documents)
         
-        # Create index
-        index = st.session_state.index_manager.create_index(processed_documents)
-        
-        # Set index in query engine
-        st.session_state.query_engine.set_index(index)
+        # Embed and store only chunks from documents not already indexed
+        added = st.session_state.index_manager.add_nodes(nodes)
         
         # Update session state
-        st.session_state.documents_processed = True
+        st.session_state.documents_processed = st.session_state.index_manager.has_documents()
         
-        st.success(f"Processed {len(uploaded_files)} documents successfully!")
+        if added:
+            st.success(f"Processed {len(uploaded_files)} documents ({len(added)} new chunks indexed).")
+        else:
+            st.info("These documents were already indexed; nothing new to add.")
 
 # Query section
 st.header("Ask Questions")
