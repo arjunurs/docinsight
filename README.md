@@ -65,17 +65,27 @@ Faithfulness runs the app's own `QueryEngine` (top 3, `compact` mode, `gpt-4o-mi
 
 ### Baseline results
 
-Full corpus (48 documents, 772 chunks), all 10,570 questions, seed 13.
+Full corpus (48 documents, 772 chunks), all 10,570 questions, seed 13. Run on 2026-10-09.
 
 | Retriever | recall@1 | recall@3 | recall@5 | recall@10 | MRR@10 |
 |---|---|---|---|---|---|
-| bm25 | 0.774 | 0.910 | 0.943 | 0.970 | 0.847 |
-| dense | pending | pending | pending | pending | pending |
-| hybrid | pending | pending | pending | pending | pending |
+| bm25 | 0.774 | **0.910** | **0.943** | 0.970 | **0.847** |
+| dense (app default) | 0.542 | 0.772 | 0.844 | 0.917 | 0.672 |
+| hybrid (RRF) | 0.700 | 0.891 | 0.938 | **0.977** | 0.802 |
 
-Answer quality (dense, 100 sampled questions): pending.
+Answer quality, 100 sampled questions through the app's `QueryEngine` (dense, top 3, `gpt-4o-mini` at 0.7, judged by `gpt-4o-mini`):
 
-Raw output lives in [`evaluation/results/`](evaluation/results/). The `dense`, `hybrid` and faithfulness rows need an OpenAI API key; a full run costs well under $1 (about 0.5M embedding tokens plus 200 `gpt-4o-mini` calls).
+| Faithfulness | Fully faithful answers | Answers with no claims | Answer recall | Context has answer |
+|---|---|---|---|---|
+| 0.960 | 95.5% | 12 / 100 | 0.67 | 0.72 |
+
+What the numbers say:
+
+- **Retrieval is the bottleneck, not generation.** Only 72% of answers had the gold answer in their top 3 chunks, and answer recall (0.67) sits just under that ceiling. Answers are almost always grounded in what was retrieved; they are wrong mostly because the right chunk was not retrieved.
+- **The app's dense retriever is the weakest of the three on this data.** Switching the app to hybrid retrieval raises recall@3 from 0.772 to 0.891 for about 0.4 ms more per query. Part of that gap is SQuAD's lexical bias (see caveats), so confirm on less lexical questions before treating BM25 as the winner on its own.
+- **Unfaithful answers came from retrieval misses.** Of the three answers scored 0.0, two were answered from the model's own knowledge after retrieval missed: one wrong ("24 points" instead of 308) and one right but ungrounded ("Virgin Media"). The third looks like a judge false negative, since the gold answer was in the retrieved context.
+
+Raw output lives in [`evaluation/results/`](evaluation/results/): `bm25_baseline.json` (offline run) and `baseline.json` (full run). A full run costs well under $1 (about 0.5M embedding tokens plus 200 `gpt-4o-mini` calls).
 
 ### Running it
 
