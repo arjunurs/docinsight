@@ -23,10 +23,10 @@ A simple Retrieval Augmented Generation (RAG) application that allows users to u
 
 Documents are processed through the following workflow:
 1. Files are loaded using LlamaIndex's SimpleDirectoryReader
-2. Text is extracted and chunked using SentenceSplitter with customizable chunk size and overlap
-3. Each chunk is converted to a Document object with metadata about its source
-4. Documents are indexed using VectorStoreIndex and stored in ChromaDB
-5. Document embeddings are generated using OpenAI's embedding model
+2. Each document gets a stable id derived from a hash of the file's contents
+3. Text is chunked once, using SentenceSplitter with configurable chunk size and overlap
+4. Chunks from documents not already in the index are embedded with OpenAI's embedding model
+5. The chunks and their embeddings are stored in ChromaDB, which persists across restarts
 
 ### Retrieval and Response Generation
 
@@ -105,6 +105,31 @@ When a user asks a question:
 2. Click "Process Documents" to index them
 3. Enter your question in the text field
 4. Click "Ask" to get answers based on your documents
+
+## Configuration
+
+All settings are optional environment variables, read at startup (see `.env.example`):
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `CHUNK_SIZE` | 512 | Tokens per chunk |
+| `CHUNK_OVERLAP` | 50 | Overlapping tokens between chunks |
+| `EMBEDDING_MODEL` | text-embedding-3-small | OpenAI embedding model |
+| `LLM_MODEL` | gpt-4o-mini | OpenAI model used to answer |
+| `LLM_TEMPERATURE` | 0.0 | Kept at 0 so answers stay grounded and repeatable |
+
+Changing `CHUNK_SIZE`, `CHUNK_OVERLAP` or `EMBEDDING_MODEL` only affects newly indexed documents; clear `data/chroma` to re-index everything.
+
+Indexed documents persist in `data/chroma` and are available again after a restart. Each document is identified by a hash of its contents, so uploading the same file again does not create duplicate entries.
+
+## Running Tests
+
+```
+pip install -r requirements-dev.txt
+pytest
+```
+
+The tests use a mock embedding model and make no OpenAI calls.
 
 ## Troubleshooting
 
