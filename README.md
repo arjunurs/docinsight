@@ -55,7 +55,7 @@ Each article is ingested as one document, the way a user uploads a whole file, a
 | Faithfulness | The judge LLM splits each generated answer into atomic claims and checks each against the retrieved context; score = supported / total claims (the RAGAS definition, [Es et al., 2023](https://arxiv.org/abs/2309.15217)). Answers with no factual claims are counted separately. |
 | Answer recall, token F1 | Whether the normalized gold answer appears in the generated answer, and SQuAD token F1. These separate "faithful but wrong" from "faithful and right". |
 
-Faithfulness runs the app's own `QueryEngine` (top 3, `compact` mode, `gpt-4o-mini` at temperature 0.7, matching `IndexManager`) over a seeded sample of questions.
+Faithfulness runs the app's own `QueryEngine` (top 3, `compact` mode) over a seeded sample of questions. Chunking, model and temperature default to the app's `AppConfig`, so a run measures what the app ships; each can be overridden by a CLI flag.
 
 ### Retrievers
 
@@ -65,7 +65,7 @@ Faithfulness runs the app's own `QueryEngine` (top 3, `compact` mode, `gpt-4o-mi
 
 ### Baseline results
 
-Full corpus (48 documents, 772 chunks), all 10,570 questions, seed 13. Run on 2026-10-09, **before** the fixes for the app issues listed under Caveats (double chunking, duplicates on re-upload, unused `.env` settings, temperature 0.7). Re-run after those fixes land to measure their effect.
+Full corpus (48 documents, 772 chunks), all 10,570 questions, seed 13. Run on 2026-10-09 against the app **before** the ingestion and config fixes in #2 (double chunking, duplicates on re-upload, unused `.env` settings, answer temperature 0.7, now 0.0). Re-run to measure their effect.
 
 | Retriever | recall@1 | recall@3 | recall@5 | recall@10 | MRR@10 |
 |---|---|---|---|---|---|
@@ -105,7 +105,7 @@ python -m evaluation.run --retrievers bm25,dense,hybrid --faithfulness 100 \
 
 - SQuAD questions were written by annotators looking at the paragraph, so they share many words with it. That favors BM25, and absolute recall here will be higher than on real user questions. Use the numbers to compare variants, not as a production estimate.
 - The judge defaults to the same model that writes the answers, which can inflate faithfulness. Pass a different `--judge-model` for a stricter check.
-- The harness measures the intended pipeline, not a few known app bugs. The app chunks twice (once in `DocumentProcessor`, again in `VectorStoreIndex`); the harness chunks once with the same settings. Re-uploading a file after a restart stores duplicate chunks in Chroma; the harness builds a fresh index each run, so duplicates are not reflected. `.env` chunk and model settings are not read by the app; the harness takes them as CLI flags. Faithfulness uses the app's temperature of 0.7, so it reflects that sampling noise until the default changes.
+- The harness chunks once and builds a fresh index per run, so it never measured the double chunking or re-upload duplicates fixed in #2. The baseline's answer quality does reflect the old temperature of 0.7.
 
 ## Getting Started
 

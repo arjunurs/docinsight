@@ -25,6 +25,7 @@ from evaluation.chunking import chunk_documents, label_relevant_chunks
 from evaluation.dataset import load_squad
 from evaluation.metrics import answer_recall, mean, reciprocal_rank, recall_at_k, token_f1
 from evaluation.retrievers import BM25Retriever, DenseRetriever, HybridRetriever
+from utils.config import AppConfig
 
 RETRIEVER_CHOICES = ("bm25", "dense", "hybrid")
 
@@ -35,13 +36,15 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
     parser.add_argument("--max-articles", type=int, default=None, help="Use only the first N of 48 articles")
     parser.add_argument("--max-questions", type=int, default=None, help="Sample N questions (seeded)")
     parser.add_argument("--ks", default="1,3,5,10", help="Cutoffs for recall@k; MRR uses the largest")
-    parser.add_argument("--chunk-size", type=int, default=512)
-    parser.add_argument("--chunk-overlap", type=int, default=50)
-    parser.add_argument("--embedding-model", default="text-embedding-3-small")
+    # Defaults follow the app's own config so runs measure what the app ships.
+    app = AppConfig()
+    parser.add_argument("--chunk-size", type=int, default=app.chunk_size)
+    parser.add_argument("--chunk-overlap", type=int, default=app.chunk_overlap)
+    parser.add_argument("--embedding-model", default=app.embedding_model)
     parser.add_argument("--faithfulness", type=int, default=0, metavar="N",
                         help="Generate and judge N answers through the app's QueryEngine (requires dense)")
-    parser.add_argument("--llm-model", default="gpt-4o-mini", help="Answer model, as in IndexManager")
-    parser.add_argument("--temperature", type=float, default=0.7, help="Answer temperature, as in IndexManager")
+    parser.add_argument("--llm-model", default=app.llm_model, help="Answer model")
+    parser.add_argument("--temperature", type=float, default=app.llm_temperature, help="Answer temperature")
     parser.add_argument("--judge-model", default="gpt-4o-mini")
     parser.add_argument("--seed", type=int, default=13)
     parser.add_argument("--output", type=Path, default=None, help="Write results JSON here")
