@@ -90,12 +90,15 @@ class IndexManager:
             The nodes that were newly added (empty if everything was already indexed)
         """
         known = {}
+        seen_node_ids = set()
         new_nodes = []
         for node in nodes:
             doc_id = node.ref_doc_id
             if doc_id not in known:
                 known[doc_id] = self.is_indexed(doc_id)
-            if not known[doc_id]:
+            # Identical files in one upload batch produce identical node ids; keep the first
+            if not known[doc_id] and node.node_id not in seen_node_ids:
+                seen_node_ids.add(node.node_id)
                 new_nodes.append(node)
 
         if new_nodes:

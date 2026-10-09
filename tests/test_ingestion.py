@@ -93,3 +93,16 @@ def test_index_is_queryable_after_restart(tmp_path, sample_file):
     hits = restarted.get_index().as_retriever(similarity_top_k=3).retrieve("topic 3")
     assert len(hits) == 3
     assert {hit.node.node_id for hit in hits} <= {node.node_id for node in added}
+
+
+def test_identical_files_in_one_batch_are_stored_once(tmp_path, sample_file):
+    copy = tmp_path / "upload_a" / "copy.txt"
+    copy.write_bytes(sample_file.read_bytes())
+    processor = DocumentProcessor(chunk_size=128, chunk_overlap=16)
+    manager = make_manager(tmp_path)
+
+    nodes = processor.process_documents(processor.load_documents([str(sample_file), str(copy)]))
+    added = manager.add_nodes(nodes)
+
+    assert len(added) == len(nodes) // 2
+    assert manager.chroma_collection.count() == len(added)
