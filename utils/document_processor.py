@@ -78,7 +78,14 @@ class DocumentProcessor:
         Returns:
             List of chunk nodes, each linked to its source document
         """
-        nodes = self.text_splitter.get_nodes_from_documents(documents)
+        # Identical files in one batch share document ids; split each document once
+        unique_documents = []
+        seen_doc_ids = set()
+        for doc in documents:
+            if doc.id_ not in seen_doc_ids:
+                seen_doc_ids.add(doc.id_)
+                unique_documents.append(doc)
+        nodes = self.text_splitter.get_nodes_from_documents(unique_documents)
 
         chunks_per_doc: Dict[str, int] = defaultdict(int)
         for node in nodes:

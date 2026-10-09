@@ -104,5 +104,7 @@ def test_identical_files_in_one_batch_are_stored_once(tmp_path, sample_file):
     nodes = processor.process_documents(processor.load_documents([str(sample_file), str(copy)]))
     added = manager.add_nodes(nodes)
 
-    assert len(added) == len(nodes) // 2
+    assert len(added) == len(nodes)
     assert manager.chroma_collection.count() == len(added)
+    assert [node.metadata["chunk_id"] for node in added] == list(range(len(added)))
+    assert {node.metadata["total_chunks"] for node in added} == {len(added)}
