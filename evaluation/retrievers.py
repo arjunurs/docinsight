@@ -41,8 +41,8 @@ class BM25Retriever:
         from rank_bm25 import BM25Okapi
 
         self.chunk_ids = [c.chunk_id for c in chunks]
-        # Prefix the title the way LlamaIndex prepends file_name metadata when embedding.
-        self.bm25 = BM25Okapi([tokenize(f"{c.title}\n{c.text}") for c in chunks])
+        # Index the same string dense embeds, so both retrievers see identical input.
+        self.bm25 = BM25Okapi([tokenize(c.embed_text) for c in chunks])
 
     def retrieve_batch(self, questions: Sequence[str], k: int) -> List[List[str]]:
         import numpy as np
@@ -83,15 +83,22 @@ class DenseRetriever:
         )
         self.batch_size = batch_size
 
+        # Keep the app's metadata and exclusions so the embedded text matches the app's.
         nodes = [
-            TextNode(id_=c.chunk_id, text=c.text, metadata={"file_name": c.title}) for c in chunks
+            TextNode(
+                id_=c.chunk_id,
+                text=c.text,
+                metadata=dict(c.node.metadata),
+                excluded_embed_metadata_keys=list(c.node.excluded_embed_metadata_keys),
+                excluded_llm_metadata_keys=list(c.node.excluded_llm_metadata_keys),
+            )
+            for c in chunks
         ]
         client = chromadb.EphemeralClient(settings=chromadb.config.Settings(anonymized_telemetry=False))
         self.collection = client.create_collection(f"eval-{uuid.uuid4().hex[:8]}")
         storage_context = StorageContext.from_defaults(
             vector_store=ChromaVectorStore(chroma_collection=self.collection)
         )
-        # file_name metadata is embedded alongside the text, as in the app.
         self.index = VectorStoreIndex(
             nodes,
             storage_context=storage_context,

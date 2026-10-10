@@ -104,7 +104,7 @@ def test_answer_spans_are_global_document_offsets(dataset):
 
 
 def test_relevance_labels_follow_chunk_offsets(dataset):
-    chunks = chunk_documents(dataset.documents, chunk_size=24, chunk_overlap=0)
+    chunks = chunk_documents(dataset.documents, chunk_size=96, chunk_overlap=0)
     relevant = label_relevant_chunks(dataset.queries, chunks)
     by_id = {c.chunk_id: c for c in chunks}
     for query in dataset.queries:
@@ -137,7 +137,7 @@ def test_rrf_prefers_documents_ranked_well_by_both():
 
 
 def test_bm25_dense_and_hybrid_retrieve_the_answer_chunk(dataset):
-    chunks = chunk_documents(dataset.documents, chunk_size=24, chunk_overlap=0)
+    chunks = chunk_documents(dataset.documents, chunk_size=96, chunk_overlap=0)
     relevant = label_relevant_chunks(dataset.queries, chunks)
     questions = [q.question for q in dataset.queries]
 

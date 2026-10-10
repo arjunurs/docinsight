@@ -36,8 +36,9 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
     parser.add_argument("--max-articles", type=int, default=None, help="Use only the first N of 48 articles")
     parser.add_argument("--max-questions", type=int, default=None, help="Sample N questions (seeded)")
     parser.add_argument("--ks", default="1,3,5,10", help="Cutoffs for recall@k; MRR uses the largest")
-    # Defaults follow the app's own config so runs measure what the app ships.
-    app = AppConfig()
+    # Defaults follow the app's own config, .env included, so runs measure what the app ships.
+    load_dotenv()
+    app = AppConfig.from_env()
     parser.add_argument("--chunk-size", type=int, default=app.chunk_size)
     parser.add_argument("--chunk-overlap", type=int, default=app.chunk_overlap)
     parser.add_argument("--embedding-model", default=app.embedding_model)
@@ -145,7 +146,6 @@ def format_table(results: Dict[str, Dict]) -> str:
 
 def main(argv: List[str] = None) -> Dict:
     args = parse_args(sys.argv[1:] if argv is None else argv)
-    load_dotenv()
 
     dataset = load_squad(max_articles=args.max_articles, max_questions=args.max_questions, seed=args.seed)
     chunks = chunk_documents(dataset.documents, args.chunk_size, args.chunk_overlap)

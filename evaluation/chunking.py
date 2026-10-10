@@ -1,16 +1,18 @@
 """
-Chunks evaluation documents with the same splitter settings the app uses and
-labels which chunks are relevant to each query.
+Chunks evaluation documents through the app's own ingestion path and labels
+which chunks are relevant to each query.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+import os
+import tempfile
+from dataclasses import dataclass, field
 from typing import Dict, List, Set
 
-from llama_index.core import Document
-from llama_index.core.node_parser import SentenceSplitter
+from llama_index.core.schema import BaseNode, MetadataMode
 
 from evaluation.dataset import EvalDocument, EvalQuery
+from utils.document_processor import DocumentProcessor
 
 
 @dataclass(frozen=True)
@@ -21,35 +23,50 @@ class Chunk:
     text: str
     start: int
     end: int
+    # The node the app would index, with its metadata and metadata exclusions.
+    node: BaseNode = field(compare=False, repr=False)
+
+    @property
+    def embed_text(self) -> str:
+        """The exact string the app embeds for this chunk: text plus non-excluded metadata."""
+        return self.node.get_content(metadata_mode=MetadataMode.EMBED)
 
 
 def chunk_documents(
     documents: List[EvalDocument], chunk_size: int = 512, chunk_overlap: int = 50
 ) -> List[Chunk]:
     """
-    Split documents with LlamaIndex's SentenceSplitter, keeping character offsets.
+    Chunk documents exactly as an upload is chunked in the app.
 
-    Defaults match DocumentProcessor and IndexManager (512 tokens, 50 overlap).
-    Only the title is attached as metadata so the token budget per chunk is
-    the same as the app's for a single uploaded file.
+    Each article is written to a .txt file in a temp directory, as app.py does
+    with uploads, then loaded and split by DocumentProcessor. That keeps the
+    reader's metadata (file_path, content_hash, ...) and its exclusions, which
+    change both the splitter's token budget and the text that gets embedded.
     """
-    splitter = SentenceSplitter(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+    processor = DocumentProcessor(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
     chunks: List[Chunk] = []
-    for doc in documents:
-        llama_doc = Document(text=doc.text, id_=doc.doc_id, metadata={"file_name": doc.title})
-        for i, node in enumerate(splitter.get_nodes_from_documents([llama_doc])):
-            if node.start_char_idx is None or node.end_char_idx is None:
-                raise ValueError(f"Chunk {i} of {doc.doc_id} has no character offsets")
-            chunks.append(
-                Chunk(
-                    chunk_id=f"{doc.doc_id}#{i}",
-                    doc_id=doc.doc_id,
-                    title=doc.title,
-                    text=node.get_content(),
-                    start=node.start_char_idx,
-                    end=node.end_char_idx,
+    with tempfile.TemporaryDirectory() as temp_dir:
+        for doc in documents:
+            path = os.path.join(temp_dir, f"{doc.title}.txt")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(doc.text)
+            loaded = processor.load_documents([path])
+            if len(loaded) != 1 or loaded[0].text != doc.text:
+                raise ValueError(f"Ingestion changed the text of {doc.doc_id}; answer offsets would not match")
+            for i, node in enumerate(processor.process_documents(loaded)):
+                if node.start_char_idx is None or node.end_char_idx is None:
+                    raise ValueError(f"Chunk {i} of {doc.doc_id} has no character offsets")
+                chunks.append(
+                    Chunk(
+                        chunk_id=f"{doc.doc_id}#{i}",
+                        doc_id=doc.doc_id,
+                        title=doc.title,
+                        text=node.get_content(),
+                        start=node.start_char_idx,
+                        end=node.end_char_idx,
+                        node=node,
+                    )
                 )
-            )
     return chunks
 
 
