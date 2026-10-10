@@ -117,7 +117,7 @@ python -m evaluation.run --retrievers bm25,dense,hybrid --faithfulness 100 \
 
 ### Prerequisites
 
-- Python 3.9+
+- Python 3.10+ (3.12 recommended; the Docker image and CI use 3.12)
 - Docker and Docker Compose (for containerized deployment)
 - OpenAI API key
 
@@ -206,7 +206,7 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-The tests use a mock embedding model and make no OpenAI calls.
+The tests use a mock embedding model and make no OpenAI calls. GitHub Actions runs them on every pull request and on pushes to `main`, on Python 3.12, the same version as the Docker image.
 
 ## Troubleshooting
 
