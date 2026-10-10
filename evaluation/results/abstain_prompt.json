@@ -1,0 +1,11 @@
+{
+  "label": "answer prompt comparison on the hybrid app (same 100 seeded questions, only the answer prompt changes)",
+  "run_at": "2026-10-10T10:16:35+00:00",
+  "note": "default_prompt = LlamaIndex default QA/refine prompts; strict_first_draft = first wording ('Do not guess'), not shipped; grounded_final = utils/prompts.py. Per-example records omitted; rerun with --output to regenerate them.",
+  "config": {"dataset": "squad-v1.1-dev", "documents": 48, "chunks": 772, "questions_evaluated": 10570, "questions_skipped": 0, "chunk_size": 512, "chunk_overlap": 50, "embedding_model": "text-embedding-3-small", "seed": 13},
+  "faithfulness": {
+    "default_prompt": {"n": 100, "faithfulness": 1.0, "fully_faithful_rate": 1.0, "no_claim_answers": 5, "judge_invalid": 0, "answer_recall": 0.77, "token_f1": 0.25055375429975013, "context_has_answer": 0.87, "no_answer_with_answer_in_context": 0, "answered_without_answer_in_context": 13, "no_answer_rate": 0.0, "retrieval_mode": "hybrid", "prompt": "default", "llm_model": "gpt-4o-mini", "temperature": 0.0, "judge_model": "gpt-4o-mini"},
+    "strict_first_draft": {"n": 100, "faithfulness": 1.0, "fully_faithful_rate": 1.0, "no_claim_answers": 15, "judge_invalid": 0, "answer_recall": 0.77, "token_f1": 0.3360562602613002, "context_has_answer": 0.87, "no_answer_with_answer_in_context": 5, "answered_without_answer_in_context": 3, "no_answer_rate": 0.15, "retrieval_mode": "hybrid", "prompt": "grounded", "llm_model": "gpt-4o-mini", "temperature": 0.0, "judge_model": "gpt-4o-mini"},
+    "grounded_final": {"n": 100, "faithfulness": 1.0, "fully_faithful_rate": 1.0, "no_claim_answers": 9, "judge_invalid": 0, "answer_recall": 0.79, "token_f1": 0.2646204624320719, "context_has_answer": 0.87, "no_answer_with_answer_in_context": 2, "answered_without_answer_in_context": 6, "no_answer_rate": 0.09, "retrieval_mode": "hybrid", "prompt": "grounded", "llm_model": "gpt-4o-mini", "temperature": 0.0, "judge_model": "gpt-4o-mini"}
+  }
+}

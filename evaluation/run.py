@@ -29,6 +29,7 @@ from utils.config import AppConfig
 from utils.query_engine import RETRIEVAL_MODES
 
 RETRIEVER_CHOICES = ("bm25", "dense", "hybrid")
+PROMPTS = ("grounded", "default")
 
 
 def parse_args(argv: List[str]) -> argparse.Namespace:
@@ -50,6 +51,9 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
     parser.add_argument("--judge-model", default="gpt-4o-mini")
     parser.add_argument("--retrieval-mode", choices=RETRIEVAL_MODES, default=app.retrieval_mode,
                         help="Retriever the app's QueryEngine uses for the faithfulness run")
+    parser.add_argument("--prompt", choices=PROMPTS, default="grounded",
+                        help="Answer prompt: the app's (grounded, says when the documents lack the answer) "
+                             "or LlamaIndex's default, for comparison")
     parser.add_argument("--seed", type=int, default=13)
     parser.add_argument("--output", type=Path, default=None, help="Write results JSON here")
     args = parser.parse_args(argv)
@@ -97,7 +101,13 @@ def evaluate_faithfulness(
     from llama_index.core import Settings
     from llama_index.llms.openai import OpenAI
 
+    from llama_index.core.prompts.default_prompt_selectors import (
+        DEFAULT_REFINE_PROMPT_SEL,
+        DEFAULT_TEXT_QA_PROMPT_SEL,
+    )
+
     from evaluation.faithfulness import judge_faithfulness
+    from utils.prompts import is_no_answer
     from utils.query_engine import QueryEngine
 
     # QueryEngine reads the global Settings, as it does inside the app.
@@ -105,7 +115,10 @@ def evaluate_faithfulness(
     Settings.embed_model = dense.embed_model
     judge = judge_llm or OpenAI(model=args.judge_model, temperature=0.0)
     # Same engine and retriever the app builds; hybrid fuses BM25 over the stored chunks
-    engine = QueryEngine(dense.index, retrieval_mode=args.retrieval_mode)
+    prompts = {}
+    if args.prompt == "default":
+        prompts = {"text_qa_template": DEFAULT_TEXT_QA_PROMPT_SEL, "refine_template": DEFAULT_REFINE_PROMPT_SEL}
+    engine = QueryEngine(dense.index, retrieval_mode=args.retrieval_mode, **prompts)
 
     sample = random.Random(args.seed).sample(queries, min(args.faithfulness, len(queries)))
     examples = []
@@ -121,6 +134,7 @@ def evaluate_faithfulness(
             "answer": response.response,
             "source_chunk_ids": source_ids,
             "context_has_answer": any(cid in relevant[query.query_id] for cid in source_ids),
+            "no_answer": is_no_answer(response.response),
             "faithfulness": result.score,
             "claims": result.claims,
             "judge_invalid": result.invalid,
@@ -141,7 +155,15 @@ def evaluate_faithfulness(
             "answer_recall": mean(e["answer_recall"] for e in examples),
             "token_f1": mean(e["token_f1"] for e in examples),
             "context_has_answer": mean(1.0 if e["context_has_answer"] else 0.0 for e in examples),
+            # Said "I don't know" although the gold chunk was retrieved (over-cautious)
+            "no_answer_with_answer_in_context": sum(1 for e in examples if e["no_answer"] and e["context_has_answer"]),
+            # Answered although the gold chunk was not retrieved (where hallucinations come from)
+            "answered_without_answer_in_context": sum(
+                1 for e in examples if not e["no_answer"] and not e["context_has_answer"]
+            ),
+            "no_answer_rate": mean(1.0 if e["no_answer"] else 0.0 for e in examples),
             "retrieval_mode": args.retrieval_mode,
+            "prompt": args.prompt,
             "llm_model": args.llm_model,
             "temperature": args.temperature,
             "judge_model": args.judge_model,
@@ -213,7 +235,7 @@ def main(argv: List[str] = None) -> Dict:
     if args.faithfulness:
         faithfulness = evaluate_faithfulness(built["dense"], queries, relevant, args)
         output["faithfulness"] = faithfulness
-        print(f"\nAnswer quality ({args.retrieval_mode}, top-3, app QueryEngine):")
+        print(f"\nAnswer quality ({args.retrieval_mode}, {args.prompt} prompt, top-3, app QueryEngine):")
         print(json.dumps(faithfulness["summary"], indent=2))
 
     if args.output:

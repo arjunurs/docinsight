@@ -181,3 +181,28 @@ def test_bm25_keeps_zero_score_matches_that_sort_after_the_cutoff():
     # and the stable sort leaves the non-matching chunks first.
     nodes = [TextNode(text=t, id_=f"n{i}") for i, t in enumerate(["alpha", "beta", "zeta one", "zeta two"])]
     assert BM25Index(nodes).rank("zeta", 2) == ["n2", "n3"]
+
+
+def test_answer_prompt_requires_grounding_and_a_fixed_no_answer_reply(tmp_path):
+    from llama_index.core import Settings
+    from llama_index.core.llms import MockLLM
+
+    from utils.prompts import NO_ANSWER
+
+    manager = make_manager(tmp_path)
+    ingest(manager, write_files(tmp_path / "upload", TOPICS))
+    Settings.llm = MockLLM()  # echoes the prompt it receives
+
+    for mode in ("hybrid", "dense"):
+        prompt_sent = QueryEngine(manager.get_index(), retrieval_mode=mode).query("tides and the Moon").response
+        assert f'reply exactly: "{NO_ANSWER}"' in prompt_sent, mode
+        assert "only the context above, not prior knowledge" in prompt_sent, mode
+        assert "Query: tides and the Moon" in prompt_sent, mode
+
+
+def test_no_answer_reply_is_detected():
+    from utils.prompts import NO_ANSWER, is_no_answer
+
+    assert is_no_answer(NO_ANSWER)
+    assert is_no_answer("I don't know based on the provided documents")
+    assert not is_no_answer("The Moon raises tides twice a day.")

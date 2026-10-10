@@ -213,7 +213,7 @@ def test_faithfulness_summary_is_strict_json_when_nothing_is_scored(dataset):
     chunks = chunk_documents(dataset.documents, chunk_size=96, chunk_overlap=0)
     relevant = label_relevant_chunks(dataset.queries, chunks)
     dense = DenseRetriever(chunks, embed_model=HashingEmbedding())
-    args = NS(llm_model="m", temperature=0.0, judge_model="j", faithfulness=2, seed=13, retrieval_mode="hybrid")
+    args = NS(llm_model="m", temperature=0.0, judge_model="j", faithfulness=2, seed=13, retrieval_mode="hybrid", prompt="grounded")
     answer_llm = MockLLM()
     no_claims = NS(complete=lambda prompt: NS(text='{"claims": []}'))
 
