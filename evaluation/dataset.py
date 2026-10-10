@@ -9,7 +9,9 @@ can be judged against whatever chunks the pipeline produces.
 from __future__ import annotations
 
 import json
+import os
 import random
+import tempfile
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
@@ -49,9 +51,16 @@ def download_squad(cache_path: Path = DEFAULT_CACHE) -> Path:
     """Download the SQuAD v1.1 dev set once and reuse the cached copy."""
     if not cache_path.exists():
         cache_path.parent.mkdir(parents=True, exist_ok=True)
-        tmp_path = cache_path.with_suffix(".part")
-        urllib.request.urlretrieve(SQUAD_DEV_URL, tmp_path)
-        tmp_path.rename(cache_path)
+        # A unique temp file plus an atomic replace, so concurrent runs never
+        # share a partial download or read a half-written cache.
+        fd, tmp_name = tempfile.mkstemp(dir=cache_path.parent, suffix=".part")
+        os.close(fd)
+        try:
+            urllib.request.urlretrieve(SQUAD_DEV_URL, tmp_name)
+            os.replace(tmp_name, cache_path)
+        finally:
+            if os.path.exists(tmp_name):
+                os.remove(tmp_name)
     return cache_path
 
 

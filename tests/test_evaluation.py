@@ -166,3 +166,37 @@ def test_judge_faithfulness_scores_supported_fraction():
 
     empty = SimpleNamespace(complete=lambda prompt: SimpleNamespace(text='{"claims": []}'))
     assert judge_faithfulness(empty, "q", "I don't know", ["ctx"]).score is None
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        '{"claims": [{"claim": "Jupiter has 3 moons", "supported": "false"}]}',
+        '{"verdict": "fine"}',
+        "no json here",
+    ],
+)
+def test_malformed_judge_replies_are_rejected_not_scored(reply):
+    with pytest.raises(ValueError):
+        parse_judge_output(reply)
+    llm = SimpleNamespace(complete=lambda prompt: SimpleNamespace(text=reply))
+    result = judge_faithfulness(llm, "q", "a", ["ctx"])
+    assert result.score is None and result.invalid
+
+
+def test_judge_retry_recovers_from_one_bad_reply():
+    replies = iter(["not json", '{"claims": [{"claim": "x", "supported": true}]}'])
+    llm = SimpleNamespace(complete=lambda prompt: SimpleNamespace(text=next(replies)))
+    result = judge_faithfulness(llm, "q", "a", ["ctx"])
+    assert result.score == 1.0 and not result.invalid
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [["--retrievers", ""], ["--ks", "0,3"], ["--max-questions", "0"], ["--max-articles", "-1"]],
+)
+def test_cli_rejects_invalid_values(argv):
+    from evaluation.run import parse_args
+
+    with pytest.raises(SystemExit):
+        parse_args(argv)

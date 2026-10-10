@@ -55,7 +55,17 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
     unknown = set(args.retrievers) - set(RETRIEVER_CHOICES)
     if unknown:
         parser.error(f"Unknown retrievers: {sorted(unknown)}")
-    args.ks = sorted({int(k) for k in args.ks.split(",")})
+    if not args.retrievers:
+        parser.error("--retrievers needs at least one of " + ",".join(RETRIEVER_CHOICES))
+    args.ks = sorted({int(k) for k in args.ks.split(",") if k.strip()})
+    if not args.ks or args.ks[0] < 1:
+        parser.error("--ks needs positive cutoffs")
+    for flag in ("max_articles", "max_questions"):
+        value = getattr(args, flag)
+        if value is not None and value < 1:
+            parser.error(f"--{flag.replace('_', '-')} must be positive")
+    if args.faithfulness < 0:
+        parser.error("--faithfulness must be zero or positive")
     if args.faithfulness and "dense" not in args.retrievers:
         parser.error("--faithfulness evaluates the app's dense pipeline; add dense to --retrievers")
     return args
@@ -109,6 +119,7 @@ def evaluate_faithfulness(
             "context_has_answer": any(cid in relevant[query.query_id] for cid in source_ids),
             "faithfulness": result.score,
             "claims": result.claims,
+            "judge_invalid": result.invalid,
             "answer_recall": answer_recall(response.response, query.answers),
             "token_f1": token_f1(response.response, query.answers),
         })
@@ -120,7 +131,8 @@ def evaluate_faithfulness(
             "n": len(examples),
             "faithfulness": mean(scored),
             "fully_faithful_rate": mean(1.0 if s == 1.0 else 0.0 for s in scored),
-            "no_claim_answers": len(examples) - len(scored),
+            "no_claim_answers": sum(1 for e in examples if e["faithfulness"] is None and not e["judge_invalid"]),
+            "judge_invalid": sum(1 for e in examples if e["judge_invalid"]),
             "answer_recall": mean(e["answer_recall"] for e in examples),
             "token_f1": mean(e["token_f1"] for e in examples),
             "context_has_answer": mean(1.0 if e["context_has_answer"] else 0.0 for e in examples),
@@ -159,6 +171,8 @@ def main(argv: List[str] = None) -> Dict:
         f"{len(dataset.queries) - len(queries)} skipped (answer split across chunks).",
         file=sys.stderr,
     )
+    if not queries:
+        sys.exit("No questions left to evaluate; try more articles or questions.")
 
     built = {}
     if "bm25" in args.retrievers or "hybrid" in args.retrievers:
