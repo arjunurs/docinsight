@@ -9,6 +9,7 @@ from llama_index.core.query_engine import RetrieverQueryEngine
 from llama_index.core.response import Response
 
 from utils.prompts import REFINE_PROMPT, TEXT_QA_PROMPT
+from utils.reranking import DEFAULT_CANDIDATES, CrossEncoderReranker
 from utils.retrieval import HybridRetriever
 
 RETRIEVAL_MODES = ("hybrid", "dense")
@@ -26,6 +27,8 @@ class QueryEngine:
         similarity_top_k: int = 3,
         text_qa_template: Optional[BasePromptTemplate] = None,
         refine_template: Optional[BasePromptTemplate] = None,
+        reranker: Optional[CrossEncoderReranker] = None,
+        rerank_candidates: int = DEFAULT_CANDIDATES,
     ):
         """
         Initialize the query engine with an optional index.
@@ -37,6 +40,9 @@ class QueryEngine:
             text_qa_template: Answer prompt; defaults to one that answers only from the
                 retrieved chunks and says so when they do not contain the answer
             refine_template: Prompt for refining an answer over more chunks (same default rule)
+            reranker: Optional cross-encoder; when set, the retriever returns rerank_candidates
+                chunks and the reranker keeps the best similarity_top_k for the LLM
+            rerank_candidates: Chunks retrieved for the reranker to choose from
         """
         if retrieval_mode not in RETRIEVAL_MODES:
             raise ValueError(f"retrieval_mode must be one of {RETRIEVAL_MODES}, got {retrieval_mode!r}")
@@ -45,6 +51,10 @@ class QueryEngine:
         self.similarity_top_k = similarity_top_k
         self.text_qa_template = text_qa_template or TEXT_QA_PROMPT
         self.refine_template = refine_template or REFINE_PROMPT
+        self.reranker = reranker
+        if self.reranker is not None:
+            self.reranker.top_n = similarity_top_k
+        self.rerank_candidates = max(rerank_candidates, similarity_top_k)
         self.query_engine = None
         if self.index:
             self._setup_query_engine()
@@ -63,21 +73,18 @@ class QueryEngine:
         """Set up the query engine with the current index."""
         if not self.index:
             return
+        top_k = self.rerank_candidates if self.reranker else self.similarity_top_k
         if self.retrieval_mode == "hybrid":
-            retriever = HybridRetriever(self.index, similarity_top_k=self.similarity_top_k)
-            self.query_engine = RetrieverQueryEngine.from_args(
-                retriever,
-                response_mode="compact",
-                text_qa_template=self.text_qa_template,
-                refine_template=self.refine_template,
-            )
+            retriever = HybridRetriever(self.index, similarity_top_k=top_k)
         else:
-            self.query_engine = self.index.as_query_engine(
-                similarity_top_k=self.similarity_top_k,
-                response_mode="compact",
-                text_qa_template=self.text_qa_template,
-                refine_template=self.refine_template,
-            )
+            retriever = self.index.as_retriever(similarity_top_k=top_k)
+        self.query_engine = RetrieverQueryEngine.from_args(
+            retriever,
+            response_mode="compact",
+            text_qa_template=self.text_qa_template,
+            refine_template=self.refine_template,
+            node_postprocessors=[self.reranker] if self.reranker else None,
+        )
     
     def query(self, query_text: str) -> Optional[Response]:
         """

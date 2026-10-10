@@ -1,0 +1,176 @@
+{
+ "label": "opt-in cross-encoder reranker (cross-encoder/ms-marco-MiniLM-L-6-v2, 10 candidates) on SQuAD and Natural Questions",
+ "run_at": "2026-10-10T17:53:55+00:00",
+ "note": "retrieval over every evaluated question; answer quality on the same 100 seeded questions per dataset through the app's QueryEngine (hybrid, grounded prompt). Per-example records omitted.",
+ "squad": {
+  "config": {
+   "dataset": "squad-v1.1-dev",
+   "documents": 48,
+   "chunks": 772,
+   "questions_evaluated": 10570,
+   "questions_skipped": 0,
+   "chunk_size": 512,
+   "chunk_overlap": 50,
+   "embedding_model": "text-embedding-3-small",
+   "seed": 13
+  },
+  "retrieval": {
+   "bm25": {
+    "recall@1": 0.7729,
+    "recall@3": 0.9097,
+    "recall@5": 0.9427,
+    "recall@10": 0.9694,
+    "mrr@10": 0.8466,
+    "ms_per_query": 0.7193
+   },
+   "dense": {
+    "recall@1": 0.5446,
+    "recall@3": 0.7733,
+    "recall@5": 0.8437,
+    "recall@10": 0.9152,
+    "mrr@10": 0.6727,
+    "ms_per_query": 4.4718
+   },
+   "hybrid": {
+    "recall@1": 0.6997,
+    "recall@3": 0.8912,
+    "recall@5": 0.9392,
+    "recall@10": 0.9752,
+    "mrr@10": 0.8027,
+    "ms_per_query": 4.3328
+   },
+   "rerank": {
+    "recall@1": 0.75,
+    "recall@3": 0.9109,
+    "recall@5": 0.9495,
+    "recall@10": 0.9752,
+    "mrr@10": 0.8354,
+    "ms_per_query": 45.8075
+   }
+  },
+  "rerank_of_dense": {
+   "recall@1": 0.7166,
+   "recall@3": 0.8662,
+   "recall@5": 0.8972,
+   "recall@10": 0.9154,
+   "mrr@10": 0.7943,
+   "ms_per_query": 48.8104
+  },
+  "answer_quality": {
+   "hybrid": {
+    "n": 100,
+    "faithfulness": 1.0,
+    "fully_faithful_rate": 1.0,
+    "no_claim_answers": 9,
+    "judge_invalid": 0,
+    "answer_recall": 0.79,
+    "token_f1": 0.2647898682955476,
+    "context_has_answer": 0.87,
+    "no_answer_with_answer_in_context": 2,
+    "answered_without_answer_in_context": 6,
+    "no_answer_rate": 0.09,
+    "retrieval_mode": "hybrid",
+    "prompt": "grounded",
+    "reranker": null,
+    "llm_model": "gpt-4o-mini",
+    "temperature": 0.0,
+    "judge_model": "gpt-4o-mini"
+   },
+   "hybrid_rerank": {
+    "n": 100,
+    "faithfulness": 1.0,
+    "fully_faithful_rate": 1.0,
+    "no_claim_answers": 5,
+    "judge_invalid": 0,
+    "answer_recall": 0.83,
+    "token_f1": 0.27359633060701194,
+    "context_has_answer": 0.93,
+    "no_answer_with_answer_in_context": 2,
+    "answered_without_answer_in_context": 4,
+    "no_answer_rate": 0.05,
+    "retrieval_mode": "hybrid",
+    "prompt": "grounded",
+    "reranker": "minilm",
+    "llm_model": "gpt-4o-mini",
+    "temperature": 0.0,
+    "judge_model": "gpt-4o-mini"
+   }
+  }
+ },
+ "nq": {
+  "config": {
+   "dataset": "mrqa-nq-dev",
+   "documents": 5332,
+   "chunks": 5670,
+   "questions_evaluated": 4177,
+   "questions_skipped": 0,
+   "chunk_size": 512,
+   "chunk_overlap": 50,
+   "embedding_model": "text-embedding-3-small",
+   "seed": 13
+  },
+  "retrieval": {
+   "bm25": {
+    "recall@1": 0.6095,
+    "recall@3": 0.7333,
+    "recall@5": 0.7745,
+    "recall@10": 0.8202,
+    "mrr@10": 0.6805,
+    "ms_per_query": 5.5889
+   },
+   "dense": {
+    "recall@1": 0.8118,
+    "recall@3": 0.9186,
+    "recall@5": 0.9433,
+    "recall@10": 0.9662,
+    "mrr@10": 0.869,
+    "ms_per_query": 3.8813
+   },
+   "hybrid": {
+    "recall@1": 0.7218,
+    "recall@3": 0.8425,
+    "recall@5": 0.8757,
+    "recall@10": 0.9208,
+    "mrr@10": 0.7897,
+    "ms_per_query": 9.8145
+   },
+   "rerank": {
+    "recall@1": 0.7783,
+    "recall@3": 0.8736,
+    "recall@5": 0.8983,
+    "recall@10": 0.9205,
+    "mrr@10": 0.8302,
+    "ms_per_query": 37.3164
+   }
+  },
+  "rerank_of_dense": {
+   "recall@1": 0.7905,
+   "recall@3": 0.8968,
+   "recall@5": 0.9275,
+   "recall@10": 0.9658,
+   "mrr@10": 0.8507,
+   "ms_per_query": 50.2089
+  },
+  "answer_quality": {
+   "hybrid_rerank": {
+    "n": 100,
+    "faithfulness": 0.9940476190476191,
+    "fully_faithful_rate": 0.9880952380952381,
+    "no_claim_answers": 16,
+    "judge_invalid": 0,
+    "answer_recall": 0.6,
+    "token_f1": 0.25763276992073814,
+    "context_has_answer": 0.89,
+    "no_answer_with_answer_in_context": 8,
+    "answered_without_answer_in_context": 4,
+    "no_answer_rate": 0.15,
+    "retrieval_mode": "hybrid",
+    "prompt": "grounded",
+    "reranker": "minilm",
+    "llm_model": "gpt-4o-mini",
+    "temperature": 0.0,
+    "judge_model": "gpt-4o-mini"
+   }
+  }
+ }
+}

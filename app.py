@@ -12,6 +12,7 @@ from utils.config import AppConfig
 from utils.document_processor import DocumentProcessor
 from utils.index_manager import IndexManager
 from utils.query_engine import QueryEngine
+from utils.reranking import build_reranker
 
 # Load environment variables
 load_dotenv()
@@ -45,11 +46,19 @@ if "index_manager" not in st.session_state:
         temperature=config.llm_temperature
     )
 if "query_engine" not in st.session_state:
+    try:
+        # Off unless RERANKER is set; needs requirements-rerank.txt
+        reranker = build_reranker(config.reranker)
+    except (ImportError, ValueError) as err:
+        st.error(f"RERANKER={config.reranker!r}: {err}")
+        st.stop()
     # The index manager reattaches to the persisted collection, so previously
     # processed documents are queryable right after a restart
     st.session_state.query_engine = QueryEngine(
         st.session_state.index_manager.get_index(),
-        retrieval_mode=config.retrieval_mode
+        retrieval_mode=config.retrieval_mode,
+        reranker=reranker,
+        rerank_candidates=config.rerank_candidates
     )
 if "documents_processed" not in st.session_state:
     st.session_state.documents_processed = st.session_state.index_manager.has_documents()
