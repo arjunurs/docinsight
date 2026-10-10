@@ -108,3 +108,21 @@ def test_identical_files_in_one_batch_are_stored_once(tmp_path, sample_file):
     assert manager.chroma_collection.count() == len(added)
     assert [node.metadata["chunk_id"] for node in added] == list(range(len(added)))
     assert {node.metadata["total_chunks"] for node in added} == {len(added)}
+
+
+def test_chunks_embed_file_name_not_temp_path(tmp_path, sample_file):
+    from llama_index.core.schema import MetadataMode
+
+    other = tmp_path / "a much longer temporary upload directory name" / "notes.txt"
+    other.parent.mkdir()
+    other.write_text(TEXT)
+
+    processor = DocumentProcessor(chunk_size=128, chunk_overlap=16)
+    nodes_a = processor.process_documents(processor.load_documents([str(sample_file)]))
+    nodes_b = processor.process_documents(processor.load_documents([str(other)]))
+
+    for mode in (MetadataMode.EMBED, MetadataMode.LLM):
+        header = nodes_a[0].get_metadata_str(mode)
+        assert header == "file_name: notes.txt"
+    # Where the upload was saved no longer changes how the text is chunked
+    assert [n.text for n in nodes_a] == [n.text for n in nodes_b]
