@@ -209,3 +209,48 @@ def test_no_answer_reply_is_detected():
     assert is_no_answer('  "I don\u2019t know based on the provided documents."\n')
     assert not is_no_answer(NO_ANSWER + " But the Moon probably raises tides.")
     assert not is_no_answer("I don't know based on the provided documents, but it is likely the Moon.")
+
+
+def test_refine_prompt_keeps_the_grounding_rule_after_a_no_answer(tmp_path):
+    from typing import Any, List
+
+    from llama_index.core import Settings
+    from llama_index.core.llms import CompletionResponse, CustomLLM, LLMMetadata
+    from llama_index.core.llms.callbacks import llm_completion_callback
+
+    from utils.prompts import NO_ANSWER
+
+    class RecordingLLM(CustomLLM):
+        """Answers NO_ANSWER every time; a small window forces one call per chunk."""
+
+        prompts: List[str] = []
+
+        @property
+        def metadata(self) -> LLMMetadata:
+            return LLMMetadata(context_window=160, num_output=16)
+
+        @llm_completion_callback()
+        def complete(self, prompt: str, formatted: bool = False, **kwargs: Any) -> CompletionResponse:
+            self.prompts.append(prompt)
+            return CompletionResponse(text=NO_ANSWER)
+
+        @llm_completion_callback()
+        def stream_complete(self, prompt: str, formatted: bool = False, **kwargs: Any):
+            raise NotImplementedError
+
+    manager = make_manager(tmp_path)
+    ingest(manager, write_files(tmp_path / "upload", TOPICS))
+
+    for mode in ("hybrid", "dense"):
+        llm = RecordingLLM()
+        Settings.llm = llm
+        QueryEngine(manager.get_index(), retrieval_mode=mode).query("tides and the Moon")
+
+        refines = [p for p in llm.prompts if "existing answer" in p]
+        assert refines, mode
+        for prompt in refines:
+            assert f"We have provided an existing answer: {NO_ANSWER}" in prompt, mode
+            assert "Using only this context and the existing answer" in prompt, mode
+            assert f'reply exactly: "{NO_ANSWER}"' in prompt, mode
+        # The chunk that answers the query reaches the LLM in one of the calls
+        assert any("raises ocean tides" in p for p in llm.prompts), mode
