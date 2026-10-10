@@ -1,0 +1,24 @@
+{
+  "run_at": "2026-10-10T09:04:44+00:00",
+  "config": {
+    "dataset": "squad-v1.1-dev",
+    "documents": 48,
+    "chunks": 772,
+    "questions_evaluated": 10570,
+    "questions_skipped": 0,
+    "chunk_size": 512,
+    "chunk_overlap": 50,
+    "embedding_model": null,
+    "seed": 13
+  },
+  "retrieval": {
+    "bm25": {
+      "recall@1": 0.7729422894985809,
+      "recall@3": 0.9097445600756859,
+      "recall@5": 0.9426679280983917,
+      "recall@10": 0.969441816461684,
+      "mrr@10": 0.8466009670976559,
+      "ms_per_query": 1.3701494597918598
+    }
+  }
+}

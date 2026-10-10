@@ -1,0 +1,56 @@
+{
+  "label": "pre-fix baseline (before app bug fixes: double chunking, re-upload duplicates, .env settings, temperature)",
+  "run_at": "2026-10-09T20:28:35+00:00",
+  "note": "Per-example faithfulness records omitted to keep the file small; rerun with --output to regenerate them.",
+  "config": {
+    "dataset": "squad-v1.1-dev",
+    "documents": 48,
+    "chunks": 772,
+    "questions_evaluated": 10570,
+    "questions_skipped": 0,
+    "chunk_size": 512,
+    "chunk_overlap": 50,
+    "embedding_model": "text-embedding-3-small",
+    "seed": 13
+  },
+  "retrieval": {
+    "bm25": {
+      "recall@1": 0.7736045411542101,
+      "recall@3": 0.909933774834437,
+      "recall@5": 0.9426679280983917,
+      "recall@10": 0.9696310312204351,
+      "mrr@10": 0.8469856662311723,
+      "ms_per_query": 0.39991266168490963
+    },
+    "dense": {
+      "recall@1": 0.5422894985808893,
+      "recall@3": 0.7718070009460738,
+      "recall@5": 0.8442762535477767,
+      "recall@10": 0.9170293282876064,
+      "mrr@10": 0.6717818849394063,
+      "ms_per_query": 4.155403760644231
+    },
+    "hybrid": {
+      "recall@1": 0.6996215704824976,
+      "recall@3": 0.8909176915799433,
+      "recall@5": 0.9378429517502365,
+      "recall@10": 0.9766319772942289,
+      "mrr@10": 0.8024616689943085,
+      "ms_per_query": 4.567271310310941
+    }
+  },
+  "faithfulness": {
+    "summary": {
+      "n": 100,
+      "faithfulness": 0.9602272727272727,
+      "fully_faithful_rate": 0.9545454545454546,
+      "no_claim_answers": 12,
+      "answer_recall": 0.67,
+      "token_f1": 0.21931939557492125,
+      "context_has_answer": 0.72,
+      "llm_model": "gpt-4o-mini",
+      "temperature": 0.7,
+      "judge_model": "gpt-4o-mini"
+    }
+  }
+}
