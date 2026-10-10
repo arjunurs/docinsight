@@ -261,6 +261,8 @@ RERANKER=minilm streamlit run app.py     # cross-encoder/ms-marco-MiniLM-L-6-v2
 EXTRAS=rerank docker-compose up -d --build   # Docker image with CPU-only PyTorch and the model baked in
 ```
 
+For Docker, also add `RERANKER=minilm` to `.env`: `EXTRAS` only installs the reranker into the image, and the container reads `RERANKER` at runtime.
+
 The retriever returns `RERANK_CANDIDATES` chunks (10 by default), the cross-encoder scores each against the question, and the best 3 go to the LLM. It works with either `RETRIEVAL_MODE`.
 
 Measured with `--retrievers rerank --reranker minilm` (recall@3, every evaluated question):

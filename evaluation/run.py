@@ -100,7 +100,7 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
         parser.error("--retrievers rerank needs --reranker (for example --reranker minilm)")
     if args.rerank_candidates < 1:
         parser.error("--rerank-candidates must be positive")
-    if args.faithfulness and "dense" not in args.retrievers:
+    if args.faithfulness and not {"dense", "hybrid", "rerank"} & set(args.retrievers):
         parser.error("--faithfulness runs the app's QueryEngine on the dense index; add dense to --retrievers")
     return args
 
@@ -221,6 +221,9 @@ def format_table(results: Dict[str, Dict]) -> str:
 def main(argv: List[str] = None) -> Dict:
     args = parse_args(sys.argv[1:] if argv is None else argv)
 
+    # Fail on an unknown --reranker or a missing extra before paying to embed the corpus
+    reranker = build_reranker(args.reranker) if "rerank" in args.retrievers or args.faithfulness else None
+
     load, dataset_name = DATASETS[args.dataset]
     dataset = load(max_documents=args.max_articles, max_questions=args.max_questions, seed=args.seed)
     chunks = chunk_documents(dataset.documents, args.chunk_size, args.chunk_overlap)
@@ -248,7 +251,7 @@ def main(argv: List[str] = None) -> Dict:
         built["hybrid"] = HybridRetriever([built["bm25"], built["dense"]])
     if "rerank" in args.retrievers:
         base = built[args.rerank_base]
-        built["rerank"] = RerankRetriever(base, chunks, build_reranker(args.reranker), args.rerank_candidates)
+        built["rerank"] = RerankRetriever(base, chunks, reranker, args.rerank_candidates)
 
     retrieval = {}
     for name in args.retrievers:

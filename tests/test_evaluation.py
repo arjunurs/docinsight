@@ -202,6 +202,26 @@ def test_cli_rejects_invalid_values(argv):
         parse_args(argv)
 
 
+def test_cli_accepts_faithfulness_with_any_retriever_that_builds_the_dense_index():
+    from evaluation.run import parse_args
+
+    for retrievers in ("dense", "hybrid", "rerank"):
+        parse_args(["--retrievers", retrievers, "--reranker", "minilm", "--faithfulness", "5"])
+    with pytest.raises(SystemExit):
+        parse_args(["--retrievers", "bm25", "--faithfulness", "5"])
+
+
+def test_bad_reranker_fails_before_the_dataset_loads(monkeypatch):
+    import evaluation.run as run
+
+    def no_load(**kwargs):
+        raise AssertionError("dataset loaded before the reranker was checked")
+
+    monkeypatch.setitem(run.DATASETS, "squad", (no_load, "squad"))
+    with pytest.raises(ValueError, match="Unknown reranker"):
+        run.main(["--dataset", "squad", "--retrievers", "rerank", "--reranker", "nope"])
+
+
 def test_faithfulness_summary_is_strict_json_when_nothing_is_scored(dataset):
     import json
     from types import SimpleNamespace as NS
