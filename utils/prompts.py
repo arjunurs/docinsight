@@ -33,6 +33,14 @@ REFINE_PROMPT = PromptTemplate(
 )
 
 
+def _normalize(text: str) -> str:
+    return text.strip().strip("\"'").strip().rstrip(".").replace("\u2019", "'").lower()
+
+
 def is_no_answer(text: str) -> bool:
-    """Whether a response is the fixed "not in the documents" reply."""
-    return NO_ANSWER.lower().rstrip(".") in text.strip().lower()
+    """
+    Whether a response is exactly the fixed "not in the documents" reply, ignoring
+    case, surrounding quotes and a trailing period. A reply that adds anything
+    else ("I don't know based on the provided documents, but ...") is an answer.
+    """
+    return _normalize(text) == _normalize(NO_ANSWER)

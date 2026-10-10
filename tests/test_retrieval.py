@@ -206,3 +206,6 @@ def test_no_answer_reply_is_detected():
     assert is_no_answer(NO_ANSWER)
     assert is_no_answer("I don't know based on the provided documents")
     assert not is_no_answer("The Moon raises tides twice a day.")
+    assert is_no_answer('  "I don\u2019t know based on the provided documents."\n')
+    assert not is_no_answer(NO_ANSWER + " But the Moon probably raises tides.")
+    assert not is_no_answer("I don't know based on the provided documents, but it is likely the Moon.")
