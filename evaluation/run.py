@@ -98,8 +98,9 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
         parser.error("--faithfulness must be zero or positive")
     if "rerank" in args.retrievers and not reranker_key(args.reranker):
         parser.error("--retrievers rerank needs --reranker (for example --reranker minilm)")
-    if args.rerank_candidates < 1:
-        parser.error("--rerank-candidates must be positive")
+    # The app's QueryEngine never reranks fewer candidates than the 3 chunks it sends to the LLM
+    if args.rerank_candidates < 3:
+        parser.error("--rerank-candidates must be at least 3 (the chunks sent to the LLM)")
     if args.faithfulness and not {"dense", "hybrid", "rerank"} & set(args.retrievers):
         parser.error("--faithfulness runs the app's QueryEngine on the dense index; add dense to --retrievers")
     return args
@@ -123,7 +124,7 @@ def evaluate_retrieval(retriever, questions, query_ids, relevant, ks) -> Dict:
 
 
 def evaluate_faithfulness(
-    dense: DenseRetriever, queries, relevant, args, answer_llm=None, judge_llm=None
+    dense: DenseRetriever, queries, relevant, args, answer_llm=None, judge_llm=None, reranker=None
 ) -> Dict:
     from llama_index.core import Settings
     from llama_index.llms.openai import OpenAI
@@ -148,7 +149,7 @@ def evaluate_faithfulness(
     engine = QueryEngine(
         dense.index,
         retrieval_mode=args.retrieval_mode,
-        reranker=build_reranker(args.reranker),
+        reranker=reranker,
         rerank_candidates=args.rerank_candidates,
         **prompts,
     )
@@ -198,6 +199,7 @@ def evaluate_faithfulness(
             "retrieval_mode": args.retrieval_mode,
             "prompt": args.prompt,
             "reranker": args.reranker or None,
+            "rerank_candidates": engine.rerank_candidates if engine.reranker is not None else None,
             "llm_model": args.llm_model,
             "temperature": args.temperature,
             "judge_model": args.judge_model,
@@ -280,7 +282,7 @@ def main(argv: List[str] = None) -> Dict:
     print("\n" + format_table(retrieval))
 
     if args.faithfulness:
-        faithfulness = evaluate_faithfulness(built["dense"], queries, relevant, args)
+        faithfulness = evaluate_faithfulness(built["dense"], queries, relevant, args, reranker=reranker)
         output["faithfulness"] = faithfulness
         print(f"\nAnswer quality ({args.retrieval_mode}, {args.prompt} prompt, top-3, app QueryEngine):")
         print(json.dumps(faithfulness["summary"], indent=2))

@@ -193,7 +193,8 @@ def test_judge_retry_recovers_from_one_bad_reply():
 
 @pytest.mark.parametrize(
     "argv",
-    [["--retrievers", ""], ["--ks", "0,3"], ["--max-questions", "0"], ["--max-articles", "-1"]],
+    [["--retrievers", ""], ["--ks", "0,3"], ["--max-questions", "0"], ["--max-articles", "-1"],
+     ["--retrievers", "rerank", "--reranker", "minilm", "--rerank-candidates", "2"]],
 )
 def test_cli_rejects_invalid_values(argv):
     from evaluation.run import parse_args
