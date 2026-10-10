@@ -1,12 +1,12 @@
 {
-  "label": "post-fix baseline (after #2: single-pass chunking, config from env, content-hash dedup, temperature 0.0)",
-  "run_at": "2026-10-09T21:15:17+00:00",
+  "label": "post-fix baseline (after #2: single-pass chunking, config from env, content-hash dedup, temperature 0.0; after #4: temp paths and bookkeeping metadata kept out of embedded chunk text)",
+  "run_at": "2026-10-10T09:07:06+00:00",
   "note": "Per-example faithfulness records omitted to keep the file small; rerun with --output to regenerate them.",
   "config": {"dataset": "squad-v1.1-dev", "documents": 48, "chunks": 772, "questions_evaluated": 10570, "questions_skipped": 0, "chunk_size": 512, "chunk_overlap": 50, "embedding_model": "text-embedding-3-small", "seed": 13},
   "retrieval": {
-    "bm25": {"recall@1": 0.7736045411542101, "recall@3": 0.909933774834437, "recall@5": 0.9426679280983917, "recall@10": 0.9696310312204351, "mrr@10": 0.8469856662311723, "ms_per_query": 0.3439318078498258},
-    "dense": {"recall@1": 0.5425733207190161, "recall@3": 0.7721854304635761, "recall@5": 0.8444654683065279, "recall@10": 0.9169347209082308, "mrr@10": 0.672056922106591, "ms_per_query": 4.1360811258238},
-    "hybrid": {"recall@1": 0.6997161778618732, "recall@3": 0.8911069063386944, "recall@5": 0.937748344370861, "recall@10": 0.9765373699148534, "mrr@10": 0.8025546995840279, "ms_per_query": 4.390290030751856}
+    "bm25": {"recall@1": 0.7729422894985809, "recall@3": 0.9097445600756859, "recall@5": 0.9426679280983917, "recall@10": 0.969441816461684, "mrr@10": 0.8466009670976559, "ms_per_query": 0.5205037251659805},
+    "dense": {"recall@1": 0.5443708609271524, "recall@3": 0.7736045411542101, "recall@5": 0.84399243140965, "recall@10": 0.915515610217597, "mrr@10": 0.6726175834572239, "ms_per_query": 4.396741733684309},
+    "hybrid": {"recall@1": 0.6996215704824976, "recall@3": 0.8903500473036897, "recall@5": 0.9387890255439925, "recall@10": 0.9749290444654684, "mrr@10": 0.8024114369809734, "ms_per_query": 4.489188930938283}
   },
-  "faithfulness": {"summary": {"n": 100, "faithfulness": 0.9488636363636364, "fully_faithful_rate": 0.9431818181818182, "no_claim_answers": 12, "answer_recall": 0.67, "token_f1": 0.21311573429844025, "context_has_answer": 0.73, "llm_model": "gpt-4o-mini", "temperature": 0.0, "judge_model": "gpt-4o-mini"}}
+  "faithfulness": {"summary": {"n": 100, "faithfulness": 0.9712643678160919, "fully_faithful_rate": 0.9655172413793104, "no_claim_answers": 13, "judge_invalid": 0, "answer_recall": 0.65, "token_f1": 0.21631168328693715, "context_has_answer": 0.73, "llm_model": "gpt-4o-mini", "temperature": 0.0, "judge_model": "gpt-4o-mini"}}
 }
