@@ -9,6 +9,22 @@ from llama_index.core import SimpleDirectoryReader, Document
 from llama_index.core.node_parser.text.sentence import SentenceSplitter
 from llama_index.core.schema import BaseNode
 
+# Metadata kept on every chunk for bookkeeping but never embedded or sent to the LLM.
+# file_path is a per-upload temp path: embedding it adds noise, eats into the chunk's
+# token budget and makes chunk boundaries depend on the machine. file_name (and a PDF's
+# page_label) stay visible because they tell the model and the retriever what the text is.
+HIDDEN_METADATA_KEYS = [
+    "file_path",
+    "file_type",
+    "file_size",
+    "creation_date",
+    "last_modified_date",
+    "last_accessed_date",
+    "content_hash",
+    "chunk_id",
+    "total_chunks",
+]
+
 
 def _file_digest(path: str) -> str:
     """Return a short SHA-256 digest of a file's bytes."""
@@ -65,6 +81,9 @@ class DocumentProcessor:
             digest = digests.get(file_path) or hashlib.sha256(doc.text.encode()).hexdigest()[:16]
             doc.id_ = f"{digest}_p{page_counter[file_path]}"
             doc.metadata["content_hash"] = digest
+            # Chunks inherit these from their document when split
+            doc.excluded_embed_metadata_keys = list(HIDDEN_METADATA_KEYS)
+            doc.excluded_llm_metadata_keys = list(HIDDEN_METADATA_KEYS)
             page_counter[file_path] += 1
         return documents
 
