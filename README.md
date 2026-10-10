@@ -206,7 +206,7 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-The tests use a mock embedding model and make no OpenAI calls.
+The tests use a mock embedding model and make no OpenAI calls. GitHub Actions runs them on every pull request and on pushes to `main`, on Python 3.9 (the Docker image) and 3.12.
 
 ## Troubleshooting
 
