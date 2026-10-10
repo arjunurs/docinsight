@@ -26,6 +26,7 @@ from evaluation.dataset import load_squad
 from evaluation.metrics import answer_recall, mean, reciprocal_rank, recall_at_k, token_f1
 from evaluation.retrievers import BM25Retriever, DenseRetriever, HybridRetriever
 from utils.config import AppConfig
+from utils.query_engine import RETRIEVAL_MODES
 
 RETRIEVER_CHOICES = ("bm25", "dense", "hybrid")
 
@@ -47,6 +48,8 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
     parser.add_argument("--llm-model", default=app.llm_model, help="Answer model")
     parser.add_argument("--temperature", type=float, default=app.llm_temperature, help="Answer temperature")
     parser.add_argument("--judge-model", default="gpt-4o-mini")
+    parser.add_argument("--retrieval-mode", choices=RETRIEVAL_MODES, default=app.retrieval_mode,
+                        help="Retriever the app's QueryEngine uses for the faithfulness run")
     parser.add_argument("--seed", type=int, default=13)
     parser.add_argument("--output", type=Path, default=None, help="Write results JSON here")
     args = parser.parse_args(argv)
@@ -67,7 +70,7 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
     if args.faithfulness < 0:
         parser.error("--faithfulness must be zero or positive")
     if args.faithfulness and "dense" not in args.retrievers:
-        parser.error("--faithfulness evaluates the app's dense pipeline; add dense to --retrievers")
+        parser.error("--faithfulness runs the app's QueryEngine on the dense index; add dense to --retrievers")
     return args
 
 
@@ -101,7 +104,8 @@ def evaluate_faithfulness(
     Settings.llm = answer_llm or OpenAI(model=args.llm_model, temperature=args.temperature)
     Settings.embed_model = dense.embed_model
     judge = judge_llm or OpenAI(model=args.judge_model, temperature=0.0)
-    engine = QueryEngine(dense.index)
+    # Same engine and retriever the app builds; hybrid fuses BM25 over the stored chunks
+    engine = QueryEngine(dense.index, retrieval_mode=args.retrieval_mode)
 
     sample = random.Random(args.seed).sample(queries, min(args.faithfulness, len(queries)))
     examples = []
@@ -137,6 +141,7 @@ def evaluate_faithfulness(
             "answer_recall": mean(e["answer_recall"] for e in examples),
             "token_f1": mean(e["token_f1"] for e in examples),
             "context_has_answer": mean(1.0 if e["context_has_answer"] else 0.0 for e in examples),
+            "retrieval_mode": args.retrieval_mode,
             "llm_model": args.llm_model,
             "temperature": args.temperature,
             "judge_model": args.judge_model,
@@ -208,7 +213,7 @@ def main(argv: List[str] = None) -> Dict:
     if args.faithfulness:
         faithfulness = evaluate_faithfulness(built["dense"], queries, relevant, args)
         output["faithfulness"] = faithfulness
-        print("\nAnswer quality (dense, top-3, app QueryEngine):")
+        print(f"\nAnswer quality ({args.retrieval_mode}, top-3, app QueryEngine):")
         print(json.dumps(faithfulness["summary"], indent=2))
 
     if args.output:

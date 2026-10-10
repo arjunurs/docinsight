@@ -28,6 +28,7 @@ class AppConfig:
     embedding_model: str = "text-embedding-3-small"
     persist_dir: str = "./data/chroma"
     collection_name: str = "document_collection"
+    retrieval_mode: str = "hybrid"
 
     @classmethod
     def from_env(cls) -> "AppConfig":
@@ -43,4 +44,5 @@ class AppConfig:
             embedding_model=os.getenv("EMBEDDING_MODEL") or defaults.embedding_model,
             persist_dir=os.getenv("CHROMA_PERSIST_DIR") or defaults.persist_dir,
             collection_name=os.getenv("CHROMA_COLLECTION") or defaults.collection_name,
+            retrieval_mode=os.getenv("RETRIEVAL_MODE") or defaults.retrieval_mode,
         )

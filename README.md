@@ -31,7 +31,7 @@ Documents are processed through the following workflow:
 ### Retrieval and Response Generation
 
 When a user asks a question:
-1. The query is processed through the VectorStoreIndex to retrieve relevant document chunks
+1. Hybrid search finds the 3 most relevant chunks: BM25 keyword search and dense vector search each rank the stored chunks, and their rankings are fused with reciprocal rank fusion (set `RETRIEVAL_MODE=dense` for vector search only)
 2. Retrieved chunks are used as context for the OpenAI LLM (gpt-4o-mini)
 3. The model generates a response based on the provided context
 4. Both the answer and source references are displayed to the user
@@ -61,7 +61,7 @@ Faithfulness runs the app's own `QueryEngine` (top 3, `compact` mode) over a see
 
 - `bm25`: lexical baseline (`rank-bm25`), runs offline with no API key.
 - `dense`: the app's stack, OpenAI `text-embedding-3-small` into ChromaDB.
-- `hybrid`: reciprocal rank fusion of the two (k = 60, 50 candidates each; [Cormack et al., 2009](https://plg.uwaterloo.ca/~gvcormac/cormacksigir09-rrf.pdf)).
+- `hybrid`: reciprocal rank fusion of the two (k = 60, 50 candidates each; [Cormack et al., 2009](https://plg.uwaterloo.ca/~gvcormac/cormacksigir09-rrf.pdf)). This is the app's default retriever; both use the same code in `utils/retrieval.py`.
 
 ### Baseline results
 
@@ -72,26 +72,28 @@ Retrieval moved by at most 0.002 across the fixes, so one table, from the latest
 | Retriever | recall@1 | recall@3 | recall@5 | recall@10 | MRR@10 |
 |---|---|---|---|---|---|
 | bm25 | 0.773 | **0.910** | **0.943** | 0.969 | **0.847** |
-| dense (app default) | 0.544 | 0.774 | 0.844 | 0.916 | 0.673 |
-| hybrid (RRF) | 0.700 | 0.890 | 0.939 | **0.975** | 0.802 |
+| dense (app default before hybrid) | 0.544 | 0.774 | 0.844 | 0.916 | 0.673 |
+| hybrid (RRF, app default) | 0.700 | 0.890 | 0.939 | **0.975** | 0.802 |
 
-Answer quality, 100 sampled questions through the app's `QueryEngine` (dense, top 3, `gpt-4o-mini`, judged by `gpt-4o-mini`):
+Answer quality, 100 sampled questions through the app's `QueryEngine` (top 3, `gpt-4o-mini`, judged by `gpt-4o-mini`):
 
-| Run | Faithfulness | Fully faithful | No-claim answers | Answer recall | Context has answer |
-|---|---|---|---|---|---|
-| Before #2 (temperature 0.7) | 0.960 | 95.5% | 12 / 100 | 0.67 | 0.72 |
-| After #2 and #4 (temperature 0.0) | 0.971 | 96.6% | 13 / 100 | 0.65 | 0.73 |
+| Run | Retriever | Faithfulness | Fully faithful | No-claim answers | Answer recall | Context has answer |
+|---|---|---|---|---|---|---|
+| Before #2 (temperature 0.7) | dense | 0.960 | 95.5% | 12 / 100 | 0.67 | 0.72 |
+| After #2 and #4 (temperature 0.0) | dense | 0.971 | 96.6% | 13 / 100 | 0.65 | 0.73 |
+| Hybrid app, same-day dense rerun | dense | 0.977 | 97.7% | 13 / 100 | 0.65 | 0.73 |
+| Hybrid app | **hybrid** | **1.000** | **100%** | 5 / 100 | **0.77** | **0.87** |
 
-The differences between runs are within noise for n = 100.
+The last two rows are the same 100 seeded questions on the same code, with only `--retrieval-mode` changed. Differences between the dense runs are within noise for n = 100; the hybrid gain is not.
 
 What the numbers say:
 
-- **Retrieval is the bottleneck, not generation.** Only about 73% of answers had the gold answer in their top 3 chunks, and answer recall (0.65) sits just under that ceiling. Answers are wrong mostly because the right chunk was not retrieved.
-- **The app's dense retriever is the weakest of the three on this data.** Switching to hybrid retrieval raises recall@3 from 0.774 to 0.890 for well under 1 ms more per query. Part of that gap is SQuAD's lexical bias (see caveats), so confirm on less lexical questions before treating BM25 as the winner on its own.
-- **Every unfaithful answer after the fixes came from a retrieval miss.** Both answers scored 0.0 in the latest run had no gold chunk in context, and the model fell back on its own knowledge: once correctly (Sufism) and once not ("24 points" instead of 308). The earlier post-#2 run showed the same pattern in all four of its 0.0 answers. An answer prompt that says "reply that you don't know when the context lacks the answer" is the obvious next change to measure.
+- **Retrieval was the bottleneck, not generation.** With dense retrieval only about 73% of answers had the gold answer in their top 3 chunks, and answer recall (0.65) sat just under that ceiling. Answers were wrong mostly because the right chunk was not retrieved.
+- **Switching the app to hybrid retrieval fixed most of that.** Hybrid raises recall@3 from 0.774 to 0.890 for well under 1 ms more per query. In the app, the share of answers whose context held the gold answer rose from 0.73 to 0.87 and answer recall from 0.65 to 0.77. Every hybrid answer was fully faithful, and the 5 no-claim answers were the model saying the context did not contain the answer. Part of the gap is SQuAD's lexical bias (see caveats), so confirm on less lexical questions before treating BM25 as the winner on its own.
+- **Every unfaithful dense answer came from a retrieval miss.** Both answers scored 0.0 in the post-#4 dense run had no gold chunk in context, and the model fell back on its own knowledge: once correctly (Sufism) and once not ("24 points" instead of 308). The earlier post-#2 run showed the same pattern in all four of its 0.0 answers. An answer prompt that says "reply that you don't know when the context lacks the answer" is the obvious next change to measure.
 - **The judge is noisy at the edges.** Before the fixes it marked one correct, in-context answer unsupported; after, it split one fact into two claims and graded them differently. Treat single-example scores with care and compare aggregate runs.
 
-Raw output lives in [`evaluation/results/`](evaluation/results/): `bm25_baseline.json` (offline run), `baseline.json` (before #2) and `baseline_postfix.json` (after #2 and #4). A full run costs well under $1 (about 0.5M embedding tokens plus 200 `gpt-4o-mini` calls).
+Raw output lives in [`evaluation/results/`](evaluation/results/): `bm25_baseline.json` (offline run), `baseline.json` (before #2) and `baseline_postfix.json` (after #2 and #4) and `hybrid_app.json` (dense vs hybrid app, same questions). A full run costs well under $1 (about 0.5M embedding tokens plus 200 `gpt-4o-mini` calls).
 
 ### Running it
 
@@ -105,7 +107,7 @@ python -m evaluation.run --retrievers bm25,dense,hybrid --faithfulness 100 \
     --output evaluation/results/baseline.json
 ```
 
-`--max-articles` and `--max-questions` shrink the run for quick iteration; `--chunk-size`, `--chunk-overlap`, `--embedding-model`, `--temperature` and `--judge-model` make it easy to compare variants against the baseline.
+`--max-articles` and `--max-questions` shrink the run for quick iteration; `--chunk-size`, `--chunk-overlap`, `--embedding-model`, `--temperature`, `--judge-model` and `--retrieval-mode` (the retriever the faithfulness run's `QueryEngine` uses, `hybrid` by default) make it easy to compare variants against the baseline.
 
 ### Caveats
 
@@ -194,6 +196,7 @@ All settings are optional environment variables, read at startup (see `.env.exam
 | `EMBEDDING_MODEL` | text-embedding-3-small | OpenAI embedding model |
 | `LLM_MODEL` | gpt-4o-mini | OpenAI model used to answer |
 | `LLM_TEMPERATURE` | 0.0 | Kept at 0 so answers stay grounded and repeatable |
+| `RETRIEVAL_MODE` | hybrid | `hybrid` (BM25 + dense, fused with RRF) or `dense` (vector search only) |
 
 Changing `CHUNK_SIZE`, `CHUNK_OVERLAP` or `EMBEDDING_MODEL` only affects newly indexed documents; clear `data/chroma` to re-index everything.
 
@@ -226,7 +229,6 @@ If you encounter any issues:
 - Multi-modal support (images, audio)
 
 ### Search & Retrieval
-- Hybrid search capabilities (keyword + semantic)
 - Advanced filtering and structured queries
 - API integration with external knowledge sources
 

@@ -1,0 +1,15 @@
+{
+  "label": "app answer quality, dense vs hybrid QueryEngine (same 100 seeded questions, same day)",
+  "run_at": "2026-10-10T09:22:07+00:00",
+  "note": "Per-example faithfulness records omitted to keep the file small; rerun with --output to regenerate them.",
+  "config": {"dataset": "squad-v1.1-dev", "documents": 48, "chunks": 772, "questions_evaluated": 10570, "questions_skipped": 0, "chunk_size": 512, "chunk_overlap": 50, "embedding_model": "text-embedding-3-small", "seed": 13},
+  "retrieval": {
+    "bm25": {"recall@1": 0.7729422894985809, "recall@3": 0.9097445600756859, "recall@5": 0.9426679280983917, "recall@10": 0.969441816461684, "mrr@10": 0.8466009670976559, "ms_per_query": 0.5177491879834756},
+    "dense": {"recall@1": 0.5443708609271524, "recall@3": 0.7729422894985809, "recall@5": 0.8438032166508987, "recall@10": 0.9151371807000946, "mrr@10": 0.6725453890165338, "ms_per_query": 3.91939089404108},
+    "hybrid": {"recall@1": 0.6996215704824976, "recall@3": 0.8901608325449385, "recall@5": 0.9385052034058656, "recall@10": 0.9748344370860927, "mrr@10": 0.8023806520400654, "ms_per_query": 4.722193708608514}
+  },
+  "faithfulness": {
+    "dense": {"n": 100, "faithfulness": 0.9770114942528736, "fully_faithful_rate": 0.9770114942528736, "no_claim_answers": 13, "judge_invalid": 0, "answer_recall": 0.65, "token_f1": 0.21146771339032824, "context_has_answer": 0.73, "retrieval_mode": "dense", "llm_model": "gpt-4o-mini", "temperature": 0.0, "judge_model": "gpt-4o-mini"},
+    "hybrid": {"n": 100, "faithfulness": 1.0, "fully_faithful_rate": 1.0, "no_claim_answers": 5, "judge_invalid": 0, "answer_recall": 0.77, "token_f1": 0.25063611458136364, "context_has_answer": 0.87, "retrieval_mode": "hybrid", "llm_model": "gpt-4o-mini", "temperature": 0.0, "judge_model": "gpt-4o-mini"}
+  }
+}

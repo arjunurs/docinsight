@@ -4,26 +4,19 @@ Retrievers under evaluation. Each one ranks chunk ids for a batch of questions.
 - bm25:   lexical baseline, runs offline with no API key.
 - dense:  the app's stack (OpenAI text-embedding-3-small + ChromaDB).
 - hybrid: reciprocal rank fusion of bm25 and dense.
+
+Tokenization, BM25 input text and RRF come from utils.retrieval, which the
+app's hybrid QueryEngine uses too, so these rankings match the app's.
 """
 from __future__ import annotations
 
-import re
 import uuid
-from typing import Dict, List, Protocol, Sequence
+from typing import List, Protocol, Sequence
 
 from evaluation.chunking import Chunk
+from utils.retrieval import CANDIDATE_DEPTH, BM25Index, reciprocal_rank_fusion
 
-# Small English stopword list; enough to stop BM25 from rewarding "the"/"of".
-_STOPWORDS = frozenset(
-    "a an and are as at be by did do does for from had has have how in is it its "
-    "of on or that the their this to was were what when where which who whom whose "
-    "why with".split()
-)
-_TOKEN_RE = re.compile(r"\w+")
-
-
-def tokenize(text: str) -> List[str]:
-    return [t for t in _TOKEN_RE.findall(text.lower()) if t not in _STOPWORDS]
+__all__ = ["BM25Retriever", "DenseRetriever", "HybridRetriever", "reciprocal_rank_fusion"]
 
 
 class Retriever(Protocol):
@@ -38,21 +31,11 @@ class BM25Retriever:
     name = "bm25"
 
     def __init__(self, chunks: List[Chunk]):
-        from rank_bm25 import BM25Okapi
-
-        self.chunk_ids = [c.chunk_id for c in chunks]
-        # Index the same string dense embeds, so both retrievers see identical input.
-        self.bm25 = BM25Okapi([tokenize(c.embed_text) for c in chunks])
+        # Indexes the same string dense embeds, so both retrievers see identical input.
+        self.index = BM25Index([c.node for c in chunks], ids=[c.chunk_id for c in chunks])
 
     def retrieve_batch(self, questions: Sequence[str], k: int) -> List[List[str]]:
-        import numpy as np
-
-        results = []
-        for question in questions:
-            scores = self.bm25.get_scores(tokenize(question))
-            top = np.argsort(-scores, kind="stable")[:k]
-            results.append([self.chunk_ids[i] for i in top])
-        return results
+        return [self.index.rank(question, k) for question in questions]
 
 
 class DenseRetriever:
@@ -116,19 +99,10 @@ class DenseRetriever:
         return results
 
 
-def reciprocal_rank_fusion(rankings: Sequence[Sequence[str]], k: int, rrf_k: int = 60) -> List[str]:
-    """Fuse ranked lists with RRF (Cormack et al., SIGIR 2009): score = sum 1/(rrf_k + rank)."""
-    scores: Dict[str, float] = {}
-    for ranking in rankings:
-        for rank, chunk_id in enumerate(ranking, start=1):
-            scores[chunk_id] = scores.get(chunk_id, 0.0) + 1.0 / (rrf_k + rank)
-    return sorted(scores, key=lambda cid: (-scores[cid], cid))[:k]
-
-
 class HybridRetriever:
     name = "hybrid"
 
-    def __init__(self, retrievers: Sequence[Retriever], candidate_depth: int = 50):
+    def __init__(self, retrievers: Sequence[Retriever], candidate_depth: int = CANDIDATE_DEPTH):
         self.retrievers = retrievers
         self.candidate_depth = candidate_depth
 
