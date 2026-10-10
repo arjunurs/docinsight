@@ -29,6 +29,8 @@ class AppConfig:
     persist_dir: str = "./data/chroma"
     collection_name: str = "document_collection"
     retrieval_mode: str = "hybrid"
+    reranker: str = ""
+    rerank_candidates: int = 10
 
     @classmethod
     def from_env(cls) -> "AppConfig":
@@ -45,4 +47,6 @@ class AppConfig:
             persist_dir=os.getenv("CHROMA_PERSIST_DIR") or defaults.persist_dir,
             collection_name=os.getenv("CHROMA_COLLECTION") or defaults.collection_name,
             retrieval_mode=os.getenv("RETRIEVAL_MODE") or defaults.retrieval_mode,
+            reranker=os.getenv("RERANKER") or defaults.reranker,
+            rerank_candidates=_int_env("RERANK_CANDIDATES", defaults.rerank_candidates),
         )

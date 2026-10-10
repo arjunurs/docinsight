@@ -62,6 +62,7 @@ Faithfulness runs the app's own `QueryEngine` (top 3, `compact` mode) over a see
 - `bm25`: lexical baseline (`rank-bm25`), runs offline with no API key.
 - `dense`: the app's stack, OpenAI `text-embedding-3-small` into ChromaDB.
 - `hybrid`: reciprocal rank fusion of the two (k = 60, 50 candidates each; [Cormack et al., 2009](https://plg.uwaterloo.ca/~gvcormac/cormacksigir09-rrf.pdf)). This is the app's default retriever; both use the same code in `utils/retrieval.py`.
+- `rerank`: hybrid's top 10 reordered by the optional cross-encoder (`--reranker minilm`, needs `requirements-rerank.txt`); the same code as the app's `RERANKER`, in `utils/reranking.py`.
 
 ### Baseline results
 
@@ -121,7 +122,17 @@ BM25 on all 4,177 questions (seed 13, 2026-10-10):
 | SQuAD v1.1 dev | 772 | 0.773 | 0.910 | 0.943 | 0.969 | 0.847 |
 | NQ (MRQA dev) | 5,670 | 0.610 | 0.733 | 0.774 | 0.820 | 0.680 |
 
-BM25 loses 18 points of recall@3 on real queries. Part of that is the larger corpus (more distractors), part is less word overlap; dense and hybrid numbers on NQ will show how much of the gap embeddings close. To produce them (needs `OPENAI_API_KEY`; about 0.9M embedding tokens, a few cents, plus 200 `gpt-4o-mini` calls for the answer run):
+BM25 loses 18 points of recall@3 on real queries. Part of that is the larger corpus (more distractors), part is less word overlap. With embeddings the ranking flips (all 4,177 questions, from the reranker run below):
+
+| NQ retriever | recall@1 | recall@3 | recall@5 | recall@10 | MRR@10 |
+|---|---|---|---|---|---|
+| bm25 | 0.610 | 0.733 | 0.774 | 0.820 | 0.680 |
+| dense | **0.812** | **0.919** | **0.943** | **0.966** | **0.869** |
+| hybrid (app default) | 0.722 | 0.842 | 0.876 | 0.921 | 0.790 |
+
+**On questions phrased the way users phrase them, dense retrieval beats hybrid by 7.7 points of recall@3**, because equal-weight fusion lets the weak BM25 ranking pull good dense hits down. On SQuAD it is the reverse (hybrid 0.891, dense 0.773). The app's hybrid default therefore suits keyword-style questions and costs recall on natural ones; weighting the fusion toward dense is the next thing to measure on both datasets.
+
+To reproduce (needs `OPENAI_API_KEY`; about 0.9M embedding tokens, a few cents, plus 200 `gpt-4o-mini` calls for the answer run):
 
 ```
 python -m evaluation.run --dataset nq --retrievers bm25,dense,hybrid --faithfulness 100 \
@@ -143,7 +154,7 @@ python -m evaluation.run --retrievers bm25,dense,hybrid --faithfulness 100 \
     --output evaluation/results/baseline.json
 ```
 
-`--max-articles` (alias `--max-documents`) and `--max-questions` shrink the run for quick iteration; `--chunk-size`, `--chunk-overlap`, `--embedding-model`, `--temperature`, `--judge-model`, `--retrieval-mode` (the retriever the faithfulness run's `QueryEngine` uses, `hybrid` by default) and `--prompt` (`grounded`, the app's, or LlamaIndex's `default`) make it easy to compare variants against the baseline.
+`--max-articles` (alias `--max-documents`) and `--max-questions` shrink the run for quick iteration; `--chunk-size`, `--chunk-overlap`, `--embedding-model`, `--temperature`, `--judge-model`, `--retrieval-mode` (the retriever the faithfulness run's `QueryEngine` uses, `hybrid` by default), `--prompt` (`grounded`, the app's, or LlamaIndex's `default`), and `--reranker`, `--rerank-candidates` and `--rerank-base` for the optional reranker make it easy to compare variants against the baseline.
 
 ### Caveats
 
@@ -233,10 +244,35 @@ All settings are optional environment variables, read at startup (see `.env.exam
 | `LLM_MODEL` | gpt-4o-mini | OpenAI model used to answer |
 | `LLM_TEMPERATURE` | 0.0 | Kept at 0 so answers stay grounded and repeatable |
 | `RETRIEVAL_MODE` | hybrid | `hybrid` (BM25 + dense, fused with RRF) or `dense` (vector search only) |
+| `RERANKER` | off | `minilm` reranks the retrieved candidates with a cross-encoder before the top 3 go to the LLM. Optional extra, see [Optional reranker](#optional-reranker) |
+| `RERANK_CANDIDATES` | 10 | Chunks retrieved for the reranker to choose from |
 
 Changing `CHUNK_SIZE`, `CHUNK_OVERLAP` or `EMBEDDING_MODEL` only affects newly indexed documents; clear `data/chroma` to re-index everything.
 
 Indexed documents persist in `data/chroma` and are available again after a restart. Each document is identified by a hash of its contents, so uploading the same file again does not create duplicate entries.
+
+## Optional reranker
+
+A cross-encoder reranker can reorder the retrieved chunks before the top 3 go to the LLM. It is off by default because it needs PyTorch (a few hundred MB with the CPU-only build, over 2 GB with pip's default CUDA build on Linux) and adds about 40-50 ms per question on a laptop CPU.
+
+```
+pip install -r requirements-rerank.txt   # sentence-transformers + PyTorch
+RERANKER=minilm streamlit run app.py     # cross-encoder/ms-marco-MiniLM-L-6-v2
+EXTRAS=rerank docker-compose up -d --build   # Docker image with CPU-only PyTorch and the model baked in
+```
+
+The retriever returns `RERANK_CANDIDATES` chunks (10 by default), the cross-encoder scores each against the question, and the best 3 go to the LLM. It works with either `RETRIEVAL_MODE`.
+
+Measured with `--retrievers rerank --reranker minilm` (recall@3, every evaluated question):
+
+| Retrieval | SQuAD | NQ |
+|---|---|---|
+| dense | 0.773 | **0.919** |
+| hybrid (app default) | 0.891 | 0.842 |
+| hybrid + reranker | **0.911** | 0.874 |
+| dense + reranker (`--rerank-base dense`) | 0.866 | 0.897 |
+
+The reranker improves hybrid on both datasets (+2.0 and +3.2 points) and lifts SQuAD answers through the app (context has the answer 0.87 to 0.93, answer recall 0.79 to 0.83, same 100 questions). No configuration wins both datasets: on NQ, dense alone stays best and reranking its candidates costs 2.1 points, likely because this MS MARCO-trained model handles NQ's tables and lists less well than the embeddings do. Larger rerankers did not help in a 2,000-question trial (MiniLM-L-12: same recall@3; bge-reranker-base: 0.814 on SQuAD). Raw output: [`evaluation/results/reranker.json`](evaluation/results/reranker.json).
 
 ## Running Tests
 

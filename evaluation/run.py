@@ -28,11 +28,12 @@ from evaluation.chunking import chunk_documents, label_relevant_chunks
 from evaluation.dataset import load_squad
 from evaluation.metrics import answer_recall, mean, reciprocal_rank, recall_at_k, token_f1
 from evaluation.nq import load_nq
-from evaluation.retrievers import BM25Retriever, DenseRetriever, HybridRetriever
+from evaluation.retrievers import BM25Retriever, DenseRetriever, HybridRetriever, RerankRetriever
 from utils.config import AppConfig
 from utils.query_engine import RETRIEVAL_MODES
+from utils.reranking import build_reranker, reranker_key
 
-RETRIEVER_CHOICES = ("bm25", "dense", "hybrid")
+RETRIEVER_CHOICES = ("bm25", "dense", "hybrid", "rerank")
 PROMPTS = ("grounded", "default")
 # name -> (loader taking max_documents, max_questions, seed; name recorded in results)
 DATASETS = {
@@ -66,6 +67,13 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
     parser.add_argument("--judge-model", default="gpt-4o-mini")
     parser.add_argument("--retrieval-mode", choices=RETRIEVAL_MODES, default=app.retrieval_mode,
                         help="Retriever the app's QueryEngine uses for the faithfulness run")
+    parser.add_argument("--reranker", default=app.reranker, metavar="NAME",
+                        help="Cross-encoder for the rerank retriever and the faithfulness run "
+                             "(minilm; needs requirements-rerank.txt). Default: the app's RERANKER, off if unset")
+    parser.add_argument("--rerank-candidates", type=int, default=app.rerank_candidates,
+                        help="Candidates the reranker chooses from")
+    parser.add_argument("--rerank-base", choices=("hybrid", "dense"), default="hybrid",
+                        help="Retriever whose candidates the rerank retriever reorders")
     parser.add_argument("--prompt", choices=PROMPTS, default="grounded",
                         help="Answer prompt: the app's (grounded, says when the documents lack the answer) "
                              "or LlamaIndex's default, for comparison")
@@ -88,6 +96,10 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
             parser.error(f"--{flag.replace('_', '-')} must be positive")
     if args.faithfulness < 0:
         parser.error("--faithfulness must be zero or positive")
+    if "rerank" in args.retrievers and not reranker_key(args.reranker):
+        parser.error("--retrievers rerank needs --reranker (for example --reranker minilm)")
+    if args.rerank_candidates < 1:
+        parser.error("--rerank-candidates must be positive")
     if args.faithfulness and "dense" not in args.retrievers:
         parser.error("--faithfulness runs the app's QueryEngine on the dense index; add dense to --retrievers")
     return args
@@ -133,7 +145,13 @@ def evaluate_faithfulness(
     prompts = {}
     if args.prompt == "default":
         prompts = {"text_qa_template": DEFAULT_TEXT_QA_PROMPT_SEL, "refine_template": DEFAULT_REFINE_PROMPT_SEL}
-    engine = QueryEngine(dense.index, retrieval_mode=args.retrieval_mode, **prompts)
+    engine = QueryEngine(
+        dense.index,
+        retrieval_mode=args.retrieval_mode,
+        reranker=build_reranker(args.reranker),
+        rerank_candidates=args.rerank_candidates,
+        **prompts,
+    )
 
     sample = random.Random(args.seed).sample(queries, min(args.faithfulness, len(queries)))
     examples = []
@@ -179,6 +197,7 @@ def evaluate_faithfulness(
             "no_answer_rate": mean(1.0 if e["no_answer"] else 0.0 for e in examples),
             "retrieval_mode": args.retrieval_mode,
             "prompt": args.prompt,
+            "reranker": args.reranker or None,
             "llm_model": args.llm_model,
             "temperature": args.temperature,
             "judge_model": args.judge_model,
@@ -219,12 +238,17 @@ def main(argv: List[str] = None) -> Dict:
         sys.exit("No questions left to evaluate; try more articles or questions.")
 
     built = {}
-    if "bm25" in args.retrievers or "hybrid" in args.retrievers:
+    rerank_hybrid = "rerank" in args.retrievers and args.rerank_base == "hybrid"
+    needs_hybrid = "hybrid" in args.retrievers or rerank_hybrid
+    if "bm25" in args.retrievers or needs_hybrid:
         built["bm25"] = BM25Retriever(chunks)
-    if "dense" in args.retrievers or "hybrid" in args.retrievers:
+    if "dense" in args.retrievers or needs_hybrid or "rerank" in args.retrievers:
         built["dense"] = DenseRetriever(chunks, embedding_model=args.embedding_model)
-    if "hybrid" in args.retrievers:
+    if needs_hybrid:
         built["hybrid"] = HybridRetriever([built["bm25"], built["dense"]])
+    if "rerank" in args.retrievers:
+        base = built[args.rerank_base]
+        built["rerank"] = RerankRetriever(base, chunks, build_reranker(args.reranker), args.rerank_candidates)
 
     retrieval = {}
     for name in args.retrievers:
@@ -243,6 +267,10 @@ def main(argv: List[str] = None) -> Dict:
             "chunk_overlap": args.chunk_overlap,
             "embedding_model": args.embedding_model if "dense" in built else None,
             "seed": args.seed,
+            "rerank": (
+                {"reranker": args.reranker, "base": args.rerank_base, "candidates": args.rerank_candidates}
+                if "rerank" in built else None
+            ),
         },
         "retrieval": retrieval,
     }

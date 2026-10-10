@@ -4,6 +4,7 @@ Retrievers under evaluation. Each one ranks chunk ids for a batch of questions.
 - bm25:   lexical baseline, runs offline with no API key.
 - dense:  the app's stack (OpenAI text-embedding-3-small + ChromaDB).
 - hybrid: reciprocal rank fusion of bm25 and dense.
+- rerank: hybrid's top candidates reordered by a cross-encoder (optional extra).
 
 Tokenization, BM25 input text and RRF come from utils.retrieval, which the
 app's hybrid QueryEngine uses too, so these rankings match the app's.
@@ -16,7 +17,7 @@ from typing import List, Protocol, Sequence
 from evaluation.chunking import Chunk
 from utils.retrieval import CANDIDATE_DEPTH, BM25Index, reciprocal_rank_fusion
 
-__all__ = ["BM25Retriever", "DenseRetriever", "HybridRetriever", "reciprocal_rank_fusion"]
+__all__ = ["BM25Retriever", "DenseRetriever", "HybridRetriever", "RerankRetriever", "reciprocal_rank_fusion"]
 
 
 class Retriever(Protocol):
@@ -114,3 +115,30 @@ class HybridRetriever:
             reciprocal_rank_fusion([rankings[i] for rankings in per_retriever], k)
             for i in range(len(questions))
         ]
+
+
+class RerankRetriever:
+    """
+    Reorders a base retriever's top candidates with the app's cross-encoder reranker.
+    """
+
+    name = "rerank"
+
+    def __init__(self, base: Retriever, chunks: List[Chunk], reranker, candidates: int):
+        self.base = base
+        # Same text the app's reranker scores: the chunk without metadata
+        self.text = {c.chunk_id: c.node.get_content() for c in chunks}
+        self.reranker = reranker
+        self.candidates = candidates
+
+    def retrieve_batch(self, questions: Sequence[str], k: int) -> List[List[str]]:
+        pools = self.base.retrieve_batch(questions, max(k, self.candidates))
+        results = []
+        for question, pool in zip(questions, pools):
+            head, tail = pool[: self.candidates], pool[self.candidates :]
+            scores = self.reranker.score(question, [self.text[cid] for cid in head])
+            # Stable: ties keep the base order
+            order = sorted(range(len(head)), key=lambda i: (-scores[i], i))
+            # Past the candidate cut the base order stays, so recall@k for k > candidates is still defined
+            results.append(([head[i] for i in order] + tail)[:k])
+        return results

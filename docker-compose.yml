@@ -5,6 +5,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        # EXTRAS=rerank docker-compose up -d --build adds the optional reranker
+        EXTRAS: ${EXTRAS:-}
     container_name: docinsight
     ports:
       - "8501:8501"
