@@ -5,6 +5,7 @@ Embeddings are mocked, so no OpenAI calls are made.
 """
 import pytest
 from llama_index.core.embeddings import MockEmbedding
+from llama_index.core.schema import MetadataMode
 
 import utils.index_manager as index_manager_module
 from utils.config import AppConfig
@@ -94,6 +95,13 @@ def test_index_is_queryable_after_restart(tmp_path, sample_file):
     assert len(hits) == 3
     assert {hit.node.node_id for hit in hits} <= {node.node_id for node in added}
 
+    # Exclusions survive the round trip through Chroma: retrieved chunks still show
+    # only the file name, and the hidden fields are still stored on the node.
+    for hit in hits:
+        for mode in (MetadataMode.EMBED, MetadataMode.LLM):
+            assert hit.node.get_metadata_str(mode) == "file_name: notes.txt"
+        assert {"file_path", "content_hash", "chunk_id", "total_chunks"} <= set(hit.node.metadata)
+
 
 def test_identical_files_in_one_batch_are_stored_once(tmp_path, sample_file):
     copy = tmp_path / "upload_a" / "copy.txt"
@@ -108,3 +116,19 @@ def test_identical_files_in_one_batch_are_stored_once(tmp_path, sample_file):
     assert manager.chroma_collection.count() == len(added)
     assert [node.metadata["chunk_id"] for node in added] == list(range(len(added)))
     assert {node.metadata["total_chunks"] for node in added} == {len(added)}
+
+
+def test_chunks_embed_file_name_not_temp_path(tmp_path, sample_file):
+    other = tmp_path / "a much longer temporary upload directory name" / "notes.txt"
+    other.parent.mkdir()
+    other.write_text(TEXT)
+
+    processor = DocumentProcessor(chunk_size=128, chunk_overlap=16)
+    nodes_a = processor.process_documents(processor.load_documents([str(sample_file)]))
+    nodes_b = processor.process_documents(processor.load_documents([str(other)]))
+
+    for mode in (MetadataMode.EMBED, MetadataMode.LLM):
+        header = nodes_a[0].get_metadata_str(mode)
+        assert header == "file_name: notes.txt"
+    # Where the upload was saved no longer changes how the text is chunked
+    assert [n.text for n in nodes_a] == [n.text for n in nodes_b]
