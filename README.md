@@ -104,19 +104,46 @@ What the numbers say:
 
 Raw output lives in [`evaluation/results/`](evaluation/results/): `bm25_baseline.json` (offline run), `baseline.json` (before #2), `baseline_postfix.json` (after #2 and #4) `hybrid_app.json` (dense vs hybrid app, same questions) and `abstain_prompt.json` (answer prompt comparison). A full run costs well under $1 (about 0.5M embedding tokens plus 200 `gpt-4o-mini` calls).
 
+### Second dataset: Natural Questions
+
+SQuAD's questions were written by annotators looking at the paragraph, so they share its words (see caveats). [Natural Questions](https://ai.google.com/research/NaturalQuestions) (Kwiatkowski et al., 2019, CC BY-SA 3.0) uses real Google search queries written before anyone saw the answer, so it tests whether retrieval holds up on questions phrased the way users phrase them. The harness loads the dev split as released for the [MRQA 2019 shared task](https://github.com/mrqa/MRQA-Shared-Task-2019) (Fisch et al., 2019), which puts NQ in SQuAD's span format, so relevance labels work exactly as above with no manual labeling. Pass `--dataset nq`; the file is downloaded on first run and cached in `data/eval/`.
+
+How the loader (`evaluation/nq.py`) shapes it:
+
+- Each distinct Wikipedia passage (NQ's "long answer": a paragraph, list or table) becomes one document, giving 5,332 documents and 5,670 chunks at the app's settings. That is a corpus of many short documents, unlike SQuAD's 48 long articles.
+- NQ's HTML tags (`<P>`, `<Td>`, ...) are stripped so documents read like plain-text uploads, with rows, list items and paragraphs on their own lines, and answer offsets are remapped to the cleaned text.
+- NQ dev has up to five annotators per question, and MRQA keeps each annotation as its own example (12,836 examples, 4,177 questions). The loader merges them into one query whose gold answers are the union of the annotators' spans, across whichever passages they chose, so a question does not count once per annotator.
+
+BM25 on all 4,177 questions (seed 13, 2026-10-10):
+
+| Dataset | Chunks | recall@1 | recall@3 | recall@5 | recall@10 | MRR@10 |
+|---|---|---|---|---|---|---|
+| SQuAD v1.1 dev | 772 | 0.773 | 0.910 | 0.943 | 0.969 | 0.847 |
+| NQ (MRQA dev) | 5,670 | 0.610 | 0.733 | 0.774 | 0.820 | 0.680 |
+
+BM25 loses 18 points of recall@3 on real queries. Part of that is the larger corpus (more distractors), part is less word overlap; dense and hybrid numbers on NQ will show how much of the gap embeddings close. To produce them (needs `OPENAI_API_KEY`; about 0.9M embedding tokens, a few cents, plus 200 `gpt-4o-mini` calls for the answer run):
+
+```
+python -m evaluation.run --dataset nq --retrievers bm25,dense,hybrid --faithfulness 100 \
+    --output evaluation/results/nq_baseline.json
+```
+
+Raw output of the BM25 run: [`evaluation/results/nq_bm25_baseline.json`](evaluation/results/nq_bm25_baseline.json).
+
 ### Running it
 
 ```
 pip install -r requirements-dev.txt
 python -m pytest tests                      # offline unit tests
 python -m evaluation.run --retrievers bm25  # offline baseline
+python -m evaluation.run --dataset nq --retrievers bm25  # same on Natural Questions
 
 # Needs OPENAI_API_KEY (read from .env)
 python -m evaluation.run --retrievers bm25,dense,hybrid --faithfulness 100 \
     --output evaluation/results/baseline.json
 ```
 
-`--max-articles` and `--max-questions` shrink the run for quick iteration; `--chunk-size`, `--chunk-overlap`, `--embedding-model`, `--temperature`, `--judge-model`, `--retrieval-mode` (the retriever the faithfulness run's `QueryEngine` uses, `hybrid` by default) and `--prompt` (`grounded`, the app's, or LlamaIndex's `default`) make it easy to compare variants against the baseline.
+`--max-articles` (alias `--max-documents`) and `--max-questions` shrink the run for quick iteration; `--chunk-size`, `--chunk-overlap`, `--embedding-model`, `--temperature`, `--judge-model`, `--retrieval-mode` (the retriever the faithfulness run's `QueryEngine` uses, `hybrid` by default) and `--prompt` (`grounded`, the app's, or LlamaIndex's `default`) make it easy to compare variants against the baseline.
 
 ### Caveats
 

@@ -39,6 +39,14 @@ class EvalQuery:
     answers: Tuple[str, ...]
     # (start, end) character offsets of each gold answer within the document text.
     answer_spans: Tuple[Tuple[int, int], ...]
+    # (doc_id, start, end) of gold answers in other documents. Natural Questions
+    # has up to five annotators per question, and they can pick different passages.
+    other_spans: Tuple[Tuple[str, int, int], ...] = ()
+
+    @property
+    def answer_locations(self) -> Tuple[Tuple[str, int, int], ...]:
+        """Every gold answer as (doc_id, start, end)."""
+        return tuple((self.doc_id, s, e) for s, e in self.answer_spans) + self.other_spans
 
 
 @dataclass(frozen=True)
@@ -49,6 +57,11 @@ class EvalDataset:
 
 def download_squad(cache_path: Path = DEFAULT_CACHE) -> Path:
     """Download the SQuAD v1.1 dev set once and reuse the cached copy."""
+    return download(SQUAD_DEV_URL, cache_path)
+
+
+def download(url: str, cache_path: Path) -> Path:
+    """Download url to cache_path once and reuse the cached copy."""
     if not cache_path.exists():
         cache_path.parent.mkdir(parents=True, exist_ok=True)
         # A unique temp file plus an atomic replace, so concurrent runs never
@@ -56,7 +69,7 @@ def download_squad(cache_path: Path = DEFAULT_CACHE) -> Path:
         fd, tmp_name = tempfile.mkstemp(dir=cache_path.parent, suffix=".part")
         os.close(fd)
         try:
-            urllib.request.urlretrieve(SQUAD_DEV_URL, tmp_name)
+            urllib.request.urlretrieve(url, tmp_name)
             os.replace(tmp_name, cache_path)
         finally:
             if os.path.exists(tmp_name):

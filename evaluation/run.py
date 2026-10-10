@@ -5,6 +5,9 @@ Examples:
     # Offline lexical baseline, no API key needed
     python -m evaluation.run --retrievers bm25
 
+    # Same on Natural Questions (real search queries, less word overlap)
+    python -m evaluation.run --dataset nq --retrievers bm25
+
     # The app's real pipeline plus hybrid and answer faithfulness (needs OPENAI_API_KEY)
     python -m evaluation.run --retrievers bm25,dense,hybrid --faithfulness 100
 """
@@ -24,18 +27,30 @@ from dotenv import load_dotenv
 from evaluation.chunking import chunk_documents, label_relevant_chunks
 from evaluation.dataset import load_squad
 from evaluation.metrics import answer_recall, mean, reciprocal_rank, recall_at_k, token_f1
+from evaluation.nq import load_nq
 from evaluation.retrievers import BM25Retriever, DenseRetriever, HybridRetriever
 from utils.config import AppConfig
 from utils.query_engine import RETRIEVAL_MODES
 
 RETRIEVER_CHOICES = ("bm25", "dense", "hybrid")
 PROMPTS = ("grounded", "default")
+# name -> (loader taking max_documents, max_questions, seed; name recorded in results)
+DATASETS = {
+    "squad": (
+        lambda max_documents, **kw: load_squad(max_articles=max_documents, **kw),
+        "squad-v1.1-dev",
+    ),
+    "nq": (load_nq, "mrqa-nq-dev"),
+}
 
 
 def parse_args(argv: List[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--dataset", choices=sorted(DATASETS), default="squad",
+                        help="squad (SQuAD v1.1 dev) or nq (Natural Questions, MRQA dev)")
     parser.add_argument("--retrievers", default="bm25", help="Comma-separated: bm25,dense,hybrid")
-    parser.add_argument("--max-articles", type=int, default=None, help="Use only the first N of 48 articles")
+    parser.add_argument("--max-articles", "--max-documents", dest="max_articles", type=int, default=None,
+                        help="Use only the first N documents (48 SQuAD articles, 5,332 NQ passages)")
     parser.add_argument("--max-questions", type=int, default=None, help="Sample N questions (seeded)")
     parser.add_argument("--ks", default="1,3,5,10", help="Cutoffs for recall@k; MRR uses the largest")
     # Defaults follow the app's own config, .env included, so runs measure what the app ships.
@@ -187,7 +202,8 @@ def format_table(results: Dict[str, Dict]) -> str:
 def main(argv: List[str] = None) -> Dict:
     args = parse_args(sys.argv[1:] if argv is None else argv)
 
-    dataset = load_squad(max_articles=args.max_articles, max_questions=args.max_questions, seed=args.seed)
+    load, dataset_name = DATASETS[args.dataset]
+    dataset = load(max_documents=args.max_articles, max_questions=args.max_questions, seed=args.seed)
     chunks = chunk_documents(dataset.documents, args.chunk_size, args.chunk_overlap)
     relevant = label_relevant_chunks(dataset.queries, chunks)
     queries = [q for q in dataset.queries if relevant[q.query_id]]
@@ -218,7 +234,7 @@ def main(argv: List[str] = None) -> Dict:
     output = {
         "run_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "config": {
-            "dataset": "squad-v1.1-dev",
+            "dataset": dataset_name,
             "documents": len(dataset.documents),
             "chunks": len(chunks),
             "questions_evaluated": len(queries),
