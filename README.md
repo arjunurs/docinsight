@@ -33,7 +33,7 @@ Documents are processed through the following workflow:
 When a user asks a question:
 1. Hybrid search finds the 3 most relevant chunks: BM25 keyword search and dense vector search each rank the stored chunks, and their rankings are fused with reciprocal rank fusion (set `RETRIEVAL_MODE=dense` for vector search only)
 2. Retrieved chunks are used as context for the OpenAI LLM (gpt-4o-mini)
-3. The model generates a response based on the provided context
+3. The model answers only from that context; when the chunks hold nothing relevant it replies "I don't know based on the provided documents." instead of guessing
 4. Both the answer and source references are displayed to the user
 
 ## Evaluation
@@ -90,10 +90,19 @@ What the numbers say:
 
 - **Retrieval was the bottleneck, not generation.** With dense retrieval only about 73% of answers had the gold answer in their top 3 chunks, and answer recall (0.65) sat just under that ceiling. Answers were wrong mostly because the right chunk was not retrieved.
 - **Switching the app to hybrid retrieval fixed most of that.** Hybrid raises recall@3 from 0.774 to 0.890 for well under 1 ms more per query. In the app, the share of answers whose context held the gold answer rose from 0.73 to 0.87 and answer recall from 0.65 to 0.77. Every hybrid answer was fully faithful, and the 5 no-claim answers were the model saying the context did not contain the answer. Part of the gap is SQuAD's lexical bias (see caveats), so confirm on less lexical questions before treating BM25 as the winner on its own.
-- **Every unfaithful dense answer came from a retrieval miss.** Both answers scored 0.0 in the post-#4 dense run had no gold chunk in context, and the model fell back on its own knowledge: once correctly (Sufism) and once not ("24 points" instead of 308). The earlier post-#2 run showed the same pattern in all four of its 0.0 answers. An answer prompt that says "reply that you don't know when the context lacks the answer" is the obvious next change to measure.
+- **Every unfaithful dense answer came from a retrieval miss.** Both answers scored 0.0 in the post-#4 dense run had no gold chunk in context, and the model fell back on its own knowledge: once correctly (Sufism) and once not ("24 points" instead of 308). The earlier post-#2 run showed the same pattern in all four of its 0.0 answers. That motivated the answer prompt below.
+- **A grounded answer prompt mostly makes "not in the documents" explicit.** The app's prompt (`utils/prompts.py`) answers only from the retrieved chunks and, when they hold nothing relevant, replies with one fixed sentence ("I don't know based on the provided documents.") that code can detect. On the hybrid app, same 100 questions, only the prompt changed:
+
+  | Answer prompt | Faithfulness | Answer recall | Fixed "don't know" replies | ...with the gold chunk retrieved | Answered without the gold chunk |
+  |---|---|---|---|---|---|
+  | LlamaIndex default | 1.000 | 0.77 | 0 (5 declines, each worded differently) | 0 | 13 |
+  | First draft ("do not guess") | 1.000 | 0.77 | 15 | 5 | 3 |
+  | **Shipped** (answer when the context answers even partly) | **1.000** | **0.79** | 9 | 2 | 6 |
+
+  With hybrid retrieval the default prompt already stayed faithful, so the gain is consistency rather than accuracy; the recall difference is two questions, within noise. The first draft was too cautious: it declined 5 questions whose answer it had been given, 4 of which the default answered correctly, so it was not shipped. "Answered without the gold chunk" counts strict span matches only, and the judge found every such answer supported by the retrieved text.
 - **The judge is noisy at the edges.** Before the fixes it marked one correct, in-context answer unsupported; after, it split one fact into two claims and graded them differently. Treat single-example scores with care and compare aggregate runs.
 
-Raw output lives in [`evaluation/results/`](evaluation/results/): `bm25_baseline.json` (offline run), `baseline.json` (before #2) and `baseline_postfix.json` (after #2 and #4) and `hybrid_app.json` (dense vs hybrid app, same questions). A full run costs well under $1 (about 0.5M embedding tokens plus 200 `gpt-4o-mini` calls).
+Raw output lives in [`evaluation/results/`](evaluation/results/): `bm25_baseline.json` (offline run), `baseline.json` (before #2), `baseline_postfix.json` (after #2 and #4) `hybrid_app.json` (dense vs hybrid app, same questions) and `abstain_prompt.json` (answer prompt comparison). A full run costs well under $1 (about 0.5M embedding tokens plus 200 `gpt-4o-mini` calls).
 
 ### Running it
 
@@ -107,7 +116,7 @@ python -m evaluation.run --retrievers bm25,dense,hybrid --faithfulness 100 \
     --output evaluation/results/baseline.json
 ```
 
-`--max-articles` and `--max-questions` shrink the run for quick iteration; `--chunk-size`, `--chunk-overlap`, `--embedding-model`, `--temperature`, `--judge-model` and `--retrieval-mode` (the retriever the faithfulness run's `QueryEngine` uses, `hybrid` by default) make it easy to compare variants against the baseline.
+`--max-articles` and `--max-questions` shrink the run for quick iteration; `--chunk-size`, `--chunk-overlap`, `--embedding-model`, `--temperature`, `--judge-model`, `--retrieval-mode` (the retriever the faithfulness run's `QueryEngine` uses, `hybrid` by default) and `--prompt` (`grounded`, the app's, or LlamaIndex's `default`) make it easy to compare variants against the baseline.
 
 ### Caveats
 
