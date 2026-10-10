@@ -129,8 +129,9 @@ def evaluate_faithfulness(
     return {
         "summary": {
             "n": len(examples),
-            "faithfulness": mean(scored),
-            "fully_faithful_rate": mean(1.0 if s == 1.0 else 0.0 for s in scored),
+            # None, not NaN, when nothing was scorable, so the JSON stays strict
+            "faithfulness": mean(scored) if scored else None,
+            "fully_faithful_rate": mean(1.0 if s == 1.0 else 0.0 for s in scored) if scored else None,
             "no_claim_answers": sum(1 for e in examples if e["faithfulness"] is None and not e["judge_invalid"]),
             "judge_invalid": sum(1 for e in examples if e["judge_invalid"]),
             "answer_recall": mean(e["answer_recall"] for e in examples),

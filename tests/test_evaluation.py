@@ -200,3 +200,24 @@ def test_cli_rejects_invalid_values(argv):
 
     with pytest.raises(SystemExit):
         parse_args(argv)
+
+
+def test_faithfulness_summary_is_strict_json_when_nothing_is_scored(dataset):
+    import json
+    from types import SimpleNamespace as NS
+
+    from llama_index.core.llms import MockLLM
+
+    from evaluation.run import evaluate_faithfulness
+
+    chunks = chunk_documents(dataset.documents, chunk_size=96, chunk_overlap=0)
+    relevant = label_relevant_chunks(dataset.queries, chunks)
+    dense = DenseRetriever(chunks, embed_model=HashingEmbedding())
+    args = NS(llm_model="m", temperature=0.0, judge_model="j", faithfulness=2, seed=13)
+    answer_llm = MockLLM()
+    no_claims = NS(complete=lambda prompt: NS(text='{"claims": []}'))
+
+    result = evaluate_faithfulness(dense, dataset.queries, relevant, args, answer_llm, no_claims)
+    summary = result["summary"]
+    assert summary["faithfulness"] is None and summary["fully_faithful_rate"] is None
+    json.dumps(summary, allow_nan=False)
