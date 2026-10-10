@@ -9,7 +9,7 @@ import tempfile
 from dataclasses import dataclass, field
 from typing import Dict, List, Set
 
-from llama_index.core.schema import BaseNode, MetadataMode
+from llama_index.core.schema import BaseNode
 
 from evaluation.dataset import EvalDocument, EvalQuery
 from utils.document_processor import DocumentProcessor
@@ -25,11 +25,6 @@ class Chunk:
     end: int
     # The node the app would index, with its metadata and metadata exclusions.
     node: BaseNode = field(compare=False, repr=False)
-
-    @property
-    def embed_text(self) -> str:
-        """The exact string the app embeds for this chunk: text plus non-excluded metadata."""
-        return self.node.get_content(metadata_mode=MetadataMode.EMBED)
 
 
 def chunk_documents(

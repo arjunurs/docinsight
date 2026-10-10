@@ -47,7 +47,10 @@ if "index_manager" not in st.session_state:
 if "query_engine" not in st.session_state:
     # The index manager reattaches to the persisted collection, so previously
     # processed documents are queryable right after a restart
-    st.session_state.query_engine = QueryEngine(st.session_state.index_manager.get_index())
+    st.session_state.query_engine = QueryEngine(
+        st.session_state.index_manager.get_index(),
+        retrieval_mode=config.retrieval_mode
+    )
 if "documents_processed" not in st.session_state:
     st.session_state.documents_processed = st.session_state.index_manager.has_documents()
 
