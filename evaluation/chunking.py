@@ -67,7 +67,8 @@ def chunk_documents(
 
 def label_relevant_chunks(queries: List[EvalQuery], chunks: List[Chunk]) -> Dict[str, Set[str]]:
     """
-    Map each query to the chunks that fully contain one of its gold answer spans.
+    Map each query to the chunks that fully contain one of its gold answer spans,
+    in any document that has one.
 
     A query whose answer straddles every chunk boundary gets an empty set; the
     runner reports and excludes those rather than counting them as misses.
@@ -80,8 +81,8 @@ def label_relevant_chunks(queries: List[EvalQuery], chunks: List[Chunk]) -> Dict
     for query in queries:
         relevant[query.query_id] = {
             chunk.chunk_id
-            for chunk in chunks_by_doc.get(query.doc_id, [])
-            for start, end in query.answer_spans
+            for doc_id, start, end in query.answer_locations
+            for chunk in chunks_by_doc.get(doc_id, [])
             if chunk.start <= start and end <= chunk.end
         }
     return relevant

@@ -221,3 +221,76 @@ def test_faithfulness_summary_is_strict_json_when_nothing_is_scored(dataset):
     summary = result["summary"]
     assert summary["faithfulness"] is None and summary["fully_faithful_rate"] is None
     json.dumps(summary, allow_nan=False)
+
+
+def _mrqa_example(context, qid, question, answer, start):
+    end = start + len(answer) - 1  # MRQA spans have inclusive ends
+    assert context[start : end + 1] == answer
+    return {
+        "context": context,
+        "qas": [{
+            "qid": qid,
+            "question": question,
+            "answers": [answer],
+            "detected_answers": [{"text": answer, "char_spans": [[start, end]]}],
+        }],
+    }
+
+
+TABLE = "<Table> <Tr> <Th> Planet </Th> <Th> Moons </Th> </Tr> <Tr> <Td> Mars </Td> <Td> 2 </Td> </Tr> </Table>"
+PARAGRAPH = "<P> Jupiter is the largest planet . </P>"
+OTHER = "<P> The largest planet , Jupiter , is a gas giant . </P>"
+NQ_EXAMPLES = [
+    _mrqa_example(TABLE, "a1", "how many moons does mars have", "2", TABLE.index("2")),
+    # Two annotators of one question, on different passages
+    _mrqa_example(PARAGRAPH, "b1", "largest planet in the solar system", "Jupiter", PARAGRAPH.index("Jupiter")),
+    _mrqa_example(OTHER, "b2", "largest planet in the solar system", "Jupiter", OTHER.index("Jupiter")),
+    # A third annotator picked the same passage and span as the first
+    _mrqa_example(PARAGRAPH, "b3", "largest planet in the solar system", "Jupiter", PARAGRAPH.index("Jupiter")),
+]
+
+
+def test_nq_strips_html_and_remaps_answer_spans():
+    from evaluation.nq import build_nq_dataset, strip_tags
+
+    text, _ = strip_tags(TABLE)
+    assert text == "Planet Moons\nMars 2"
+    dataset = build_nq_dataset(NQ_EXAMPLES)
+    docs = {d.doc_id: d.text for d in dataset.documents}
+    assert all("<" not in t for t in docs.values())
+    for query in dataset.queries:
+        for doc_id, start, end in query.answer_locations:
+            assert docs[doc_id][start:end] in query.answers
+
+
+def test_nq_merges_annotator_copies_across_passages():
+    from evaluation.nq import build_nq_dataset
+
+    dataset = build_nq_dataset(NQ_EXAMPLES)
+    assert len(dataset.documents) == 3
+    assert [q.query_id for q in dataset.queries] == ["a1", "b1"]
+    merged = dataset.queries[1]
+    assert merged.answers == ("Jupiter",)
+    assert len(merged.answer_spans) == 1 and len(merged.other_spans) == 1
+
+    chunks = chunk_documents(dataset.documents, chunk_size=96, chunk_overlap=0)
+    relevant = label_relevant_chunks(dataset.queries, chunks)
+    # Retrieving either annotator's passage counts as a hit.
+    assert {c.split("#")[0] for c in relevant["b1"]} == {merged.doc_id, merged.other_spans[0][0]}
+
+
+def test_nq_max_documents_drops_questions_with_gold_outside_the_corpus(tmp_path):
+    import gzip
+    import json
+
+    from evaluation.nq import load_nq
+
+    path = tmp_path / "nq.jsonl.gz"
+    with gzip.open(path, "wt", encoding="utf-8") as f:
+        f.write(json.dumps({"header": {"dataset": "NaturalQuestionsShort"}}) + "\n")
+        for example in NQ_EXAMPLES:
+            f.write(json.dumps(example) + "\n")
+
+    assert len(load_nq(path).queries) == 2
+    # The merged question also has gold in the third passage, so only a1 survives.
+    assert [q.query_id for q in load_nq(path, max_documents=2).queries] == ["a1"]
