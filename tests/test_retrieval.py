@@ -238,8 +238,11 @@ def test_refine_prompt_keeps_the_grounding_rule_after_a_no_answer(tmp_path):
         def stream_complete(self, prompt: str, formatted: bool = False, **kwargs: Any):
             raise NotImplementedError
 
+    # Three chunks, so the top 3 retrieved are all of them whatever the mock
+    # embedding's ties, and the tides chunk always reaches the LLM.
+    topics = {name: TOPICS[name] for name in ("volcanoes.txt", "tides.txt", "bees.txt")}
     manager = make_manager(tmp_path)
-    ingest(manager, write_files(tmp_path / "upload", TOPICS))
+    ingest(manager, write_files(tmp_path / "upload", topics))
 
     for mode in ("hybrid", "dense"):
         llm = RecordingLLM()
