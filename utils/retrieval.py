@@ -73,10 +73,12 @@ class BM25Index:
 
         terms = tokenize(query)
         scores = self.bm25.get_scores(terms)
-        top = np.argsort(-scores, kind="stable")[:k]
+        order = np.argsort(-scores, kind="stable")
         # Test for shared words, not score > 0: Okapi IDF is exactly 0 for a
-        # word in half the chunks, so a real match can still score 0.
-        return [self.node_ids[i] for i in top if any(t in self.bm25.doc_freqs[i] for t in terms)]
+        # word in half the chunks, so a real match can still score 0. Filter
+        # before cutting to k, or zero-score matches past the cut would be lost.
+        matches = [self.node_ids[i] for i in order if any(t in self.bm25.doc_freqs[i] for t in terms)]
+        return matches[:k]
 
 
 class HybridRetriever(BaseRetriever):

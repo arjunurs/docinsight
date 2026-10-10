@@ -7,14 +7,14 @@ cannot tell chunks apart and any correct ranking has to come from BM25.
 import pytest
 from llama_index.core import QueryBundle
 from llama_index.core.embeddings import MockEmbedding
-from llama_index.core.schema import MetadataMode, NodeWithScore
+from llama_index.core.schema import MetadataMode, NodeWithScore, TextNode
 
 import utils.index_manager as index_manager_module
 from utils.config import AppConfig
 from utils.document_processor import DocumentProcessor
 from utils.index_manager import IndexManager
 from utils.query_engine import QueryEngine
-from utils.retrieval import HybridRetriever, reciprocal_rank_fusion
+from utils.retrieval import BM25Index, HybridRetriever, reciprocal_rank_fusion
 
 TOPICS = {
     "volcanoes.txt": "Basalt lava flows from shield volcanoes such as Mauna Loa.",
@@ -174,3 +174,10 @@ def test_bm25_with_no_matching_words_leaves_the_dense_ranking_alone(tmp_path, mo
     dense_order = ["tides.txt", "comets.txt", "bees.txt", "glaciers.txt", "volcanoes.txt"]
     fake_dense(monkeypatch, retriever, dense_order)
     assert file_names(retriever.retrieve(query)) == dense_order[:3]
+
+
+def test_bm25_keeps_zero_score_matches_that_sort_after_the_cutoff():
+    # "zeta" is in exactly half the chunks, so Okapi IDF gives it a score of 0
+    # and the stable sort leaves the non-matching chunks first.
+    nodes = [TextNode(text=t, id_=f"n{i}") for i, t in enumerate(["alpha", "beta", "zeta one", "zeta two"])]
+    assert BM25Index(nodes).rank("zeta", 2) == ["n2", "n3"]
