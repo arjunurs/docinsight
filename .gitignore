@@ -34,3 +34,5 @@ var/
 .DS_Store
 *.tmp
 tmp/ 
+# Evaluation dataset cache
+/data/eval/
