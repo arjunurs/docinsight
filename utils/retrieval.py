@@ -58,17 +58,25 @@ class BM25Index:
 
         self.nodes = list(nodes)
         self.node_ids = list(ids) if ids is not None else [node.node_id for node in self.nodes]
+        self.by_id = dict(zip(self.node_ids, self.nodes))
         self.bm25 = BM25Okapi([tokenize(bm25_text(node)) for node in self.nodes]) if self.nodes else None
 
     def rank(self, query: str, k: int) -> List[str]:
-        """Top-k node ids for a query, best first."""
+        """
+        Top-k node ids for a query, best first. Chunks that share no word with
+        the query are left out, so a query with no keyword match returns an
+        empty ranking instead of arbitrary chunks for RRF to reward.
+        """
         if self.bm25 is None:
             return []
         import numpy as np
 
-        scores = self.bm25.get_scores(tokenize(query))
+        terms = tokenize(query)
+        scores = self.bm25.get_scores(terms)
         top = np.argsort(-scores, kind="stable")[:k]
-        return [self.node_ids[i] for i in top]
+        # Test for shared words, not score > 0: Okapi IDF is exactly 0 for a
+        # word in half the chunks, so a real match can still score 0.
+        return [self.node_ids[i] for i in top if any(t in self.bm25.doc_freqs[i] for t in terms)]
 
 
 class HybridRetriever(BaseRetriever):
@@ -115,9 +123,11 @@ class HybridRetriever(BaseRetriever):
         dense_hits = self.index.as_retriever(similarity_top_k=depth).retrieve(query_bundle)
         bm25 = self._bm25_index()
 
-        nodes = {node.node_id: node for node in bm25.nodes}
-        nodes.update({hit.node.node_id: hit.node for hit in dense_hits})
+        nodes = {hit.node.node_id: hit.node for hit in dense_hits}
         rankings = [[hit.node.node_id for hit in dense_hits], bm25.rank(query_bundle.query_str, depth)]
         scores = rrf_scores(rankings, self.rrf_k)
         fused = reciprocal_rank_fusion(rankings, self.similarity_top_k, self.rrf_k)
-        return [NodeWithScore(node=nodes[node_id], score=scores[node_id]) for node_id in fused]
+        return [
+            NodeWithScore(node=nodes.get(node_id) or bm25.by_id[node_id], score=scores[node_id])
+            for node_id in fused
+        ]

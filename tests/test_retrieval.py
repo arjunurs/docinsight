@@ -162,3 +162,15 @@ def test_config_reads_retrieval_mode(monkeypatch):
 def test_empty_collection_returns_nothing(tmp_path):
     retriever = HybridRetriever(make_manager(tmp_path).get_index(), similarity_top_k=3)
     assert retriever.retrieve("anything") == []
+
+
+def test_bm25_with_no_matching_words_leaves_the_dense_ranking_alone(tmp_path, monkeypatch):
+    manager = make_manager(tmp_path)
+    ingest(manager, write_files(tmp_path / "upload", TOPICS))
+    retriever = HybridRetriever(manager.get_index(), similarity_top_k=3)
+    query = "xylophone quokka"  # shares no word with any chunk
+    assert retriever._bm25_index().rank(query, 5) == []
+
+    dense_order = ["tides.txt", "comets.txt", "bees.txt", "glaciers.txt", "volcanoes.txt"]
+    fake_dense(monkeypatch, retriever, dense_order)
+    assert file_names(retriever.retrieve(query)) == dense_order[:3]
