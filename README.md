@@ -117,7 +117,7 @@ python -m evaluation.run --retrievers bm25,dense,hybrid --faithfulness 100 \
 
 ### Prerequisites
 
-- Python 3.9+
+- Python 3.10+
 - Docker and Docker Compose (for containerized deployment)
 - OpenAI API key
 
