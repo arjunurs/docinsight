@@ -23,9 +23,9 @@ class AppConfig:
 
     chunk_size: int = 512
     chunk_overlap: int = 50
-    llm_model: str = "gpt-6-luna"
+    llm_model: str = "claude-haiku-5-5"
     llm_temperature: float = 0.0
-    # GPT-5 and later are reasoning models; "none" answers directly, like gpt-4o-mini did
+    # "none" answers directly: no thinking on Claude Haiku 5.5 and GPT-6 Luna, like gpt-4o-mini
     llm_reasoning_effort: str = "none"
     embedding_model: str = "text-embedding-3-small"
     persist_dir: str = "./data/chroma"

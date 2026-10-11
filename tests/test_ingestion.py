@@ -56,8 +56,14 @@ def test_config_reads_env(monkeypatch):
 
 def test_default_llm_answers_without_reasoning(tmp_path):
     llm = make_manager(tmp_path).llm
-    assert llm.model == AppConfig().llm_model
-    assert llm._get_model_kwargs()["reasoning_effort"] == "none"
+    assert llm.model == AppConfig().llm_model == "claude-haiku-5-5"
+    assert llm.thinking_dict == {"type": "disabled"}
+    assert "temperature" not in llm._model_kwargs
+
+
+def test_openai_reasoning_model_answers_without_reasoning(tmp_path):
+    manager = IndexManager(persist_dir=str(tmp_path / "chroma"), collection_name="test", llm_model="gpt-6-luna")
+    assert manager.llm._get_model_kwargs()["reasoning_effort"] == "none"
 
 
 def test_older_models_keep_temperature_zero(tmp_path):

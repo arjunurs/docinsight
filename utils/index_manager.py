@@ -23,7 +23,7 @@ class IndexManager:
         persist_dir: str = "./data/chroma",
         collection_name: str = "document_collection",
         embedding_model: str = "text-embedding-3-small",
-        llm_model: str = "gpt-6-luna",
+        llm_model: str = "claude-haiku-5-5",
         temperature: float = 0.0,
         reasoning_effort: str = "none"
     ):
