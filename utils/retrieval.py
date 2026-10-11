@@ -1,10 +1,11 @@
 """
-Hybrid retrieval: BM25 keyword search and dense vector search fused with
-reciprocal rank fusion (RRF). Shared by the app's QueryEngine and the
-evaluation harness, so both rank chunks the same way.
+Hybrid retrieval: BM25 keyword search and dense vector search, fused either by
+their scores (the default) or by reciprocal rank fusion (RRF). Shared by the
+app's QueryEngine and the evaluation harness, so both rank chunks the same way.
 """
+import math
 import re
-from typing import Dict, List, Optional, Sequence
+from typing import Dict, List, Mapping, Optional, Sequence
 
 from llama_index.core import QueryBundle, VectorStoreIndex
 from llama_index.core.retrievers import BaseRetriever
@@ -13,6 +14,9 @@ from llama_index.core.vector_stores.utils import metadata_dict_to_node
 
 RRF_K = 60
 CANDIDATE_DEPTH = 50
+FUSION_MODES = ("score", "rrf")
+# Weight on dense in score fusion, chosen on SQuAD and Natural Questions (see README)
+DENSE_WEIGHT = 0.7
 
 # Small English stopword list; enough to stop BM25 from rewarding "the"/"of".
 _STOPWORDS = frozenset(
@@ -48,6 +52,68 @@ def reciprocal_rank_fusion(rankings: Sequence[Sequence[str]], k: int, rrf_k: int
     return sorted(scores, key=lambda cid: (-scores[cid], cid))[:k]
 
 
+def _min_max(scores: Mapping[str, float]) -> Dict[str, float]:
+    lo, hi = min(scores.values()), max(scores.values())
+    return {cid: (v - lo) / (hi - lo) if hi > lo else 0.0 for cid, v in scores.items()}
+
+
+def fused_scores(
+    dense: Mapping[str, float], keyword: Mapping[str, float], dense_weight: float = DENSE_WEIGHT
+) -> Dict[str, float]:
+    """
+    Score fusion: a weighted sum of each retriever's scores, min-max scaled per query.
+
+    Candidates are the ids in either map, and higher scores are better. A candidate
+    missing from one map takes that map's lowest score, since it fell below that
+    retriever's cutoff. Unlike RRF this sees how strong a match is, so a confident
+    keyword match can win while weak keyword matches barely move the dense order.
+    """
+    ids = set(dense) | set(keyword)
+    if not ids:
+        return {}
+    dense_floor = min(dense.values()) if dense else 0.0
+    keyword_floor = min(keyword.values()) if keyword else 0.0
+    d = _min_max({cid: dense.get(cid, dense_floor) for cid in ids})
+    kw = _min_max({cid: keyword.get(cid, keyword_floor) for cid in ids})
+    return {cid: dense_weight * d[cid] + (1 - dense_weight) * kw[cid] for cid in ids}
+
+
+def score_fusion(
+    dense: Mapping[str, float], keyword: Mapping[str, float], k: int, dense_weight: float = DENSE_WEIGHT
+) -> List[str]:
+    """Top-k ids by fused_scores; ties break on id so the order is deterministic."""
+    scores = fused_scores(dense, keyword, dense_weight)
+    return sorted(scores, key=lambda cid: (-scores[cid], cid))[:k]
+
+
+def chroma_score_to_dense(score: float) -> float:
+    """
+    LlamaIndex reports a Chroma hit as exp(-squared L2 distance). Undo that, so
+    score fusion scales a value linear in cosine similarity (for unit-length
+    embeddings, squared L2 distance is 2 - 2 * cosine).
+    """
+    return math.log(score) if score > 0 else -math.inf
+
+
+def stored_dense_scores(collection, query_embedding: Sequence[float], ids: Sequence[str]) -> Dict[str, float]:
+    """
+    Dense scores for chunks dense search did not return, from their embeddings
+    stored in Chroma: minus the squared L2 distance to the query embedding, the
+    same scale as chroma_score_to_dense gives search hits. No embedding API call.
+    """
+    if not ids:
+        return {}
+    import numpy as np
+
+    stored = collection.get(ids=list(ids), include=["embeddings"])
+    query = np.asarray(query_embedding, dtype=float)
+    # Chroma may return ids in a different order than asked, so match by id
+    return {
+        cid: -float(((np.asarray(vector, dtype=float) - query) ** 2).sum())
+        for cid, vector in zip(stored["ids"], stored["embeddings"])
+    }
+
+
 class BM25Index:
     """
     BM25 over a fixed list of chunk nodes, ranked by node id (or by the ids given).
@@ -59,6 +125,7 @@ class BM25Index:
         self.nodes = list(nodes)
         self.node_ids = list(ids) if ids is not None else [node.node_id for node in self.nodes]
         self.by_id = dict(zip(self.node_ids, self.nodes))
+        self.position = {node_id: i for i, node_id in enumerate(self.node_ids)}
         self.bm25 = BM25Okapi([tokenize(bm25_text(node)) for node in self.nodes]) if self.nodes else None
 
     def rank(self, query: str, k: int) -> List[str]:
@@ -80,10 +147,18 @@ class BM25Index:
         matches = [self.node_ids[i] for i in order if any(t in self.bm25.doc_freqs[i] for t in terms)]
         return matches[:k]
 
+    def scores_for(self, query: str, ids: Sequence[str]) -> Dict[str, float]:
+        """BM25 score of each given id for a query (ids not in the index are skipped)."""
+        if self.bm25 is None:
+            return {}
+        scores = self.bm25.get_scores(tokenize(query))
+        return {cid: float(scores[self.position[cid]]) for cid in ids if cid in self.position}
+
 
 class HybridRetriever(BaseRetriever):
     """
-    Fuses dense and BM25 rankings of the chunks stored in a Chroma-backed index.
+    Fuses dense and BM25 results for the chunks stored in a Chroma-backed index,
+    by score (fusion="score", the default) or by rank (fusion="rrf").
 
     The BM25 side is built from the persisted Chroma collection itself, so it
     covers exactly the chunks the app stores and is rebuilt after a restart
@@ -97,13 +172,21 @@ class HybridRetriever(BaseRetriever):
         similarity_top_k: int = 3,
         candidate_depth: int = CANDIDATE_DEPTH,
         rrf_k: int = RRF_K,
+        fusion: str = "score",
+        dense_weight: float = DENSE_WEIGHT,
     ):
+        if fusion not in FUSION_MODES:
+            raise ValueError(f"fusion must be one of {FUSION_MODES}, got {fusion!r}")
+        if not 0.0 <= dense_weight <= 1.0:
+            raise ValueError(f"dense_weight must be between 0 and 1, got {dense_weight}")
         super().__init__()
         self.index = index
         self.collection = index.vector_store.client
         self.similarity_top_k = similarity_top_k
         self.candidate_depth = candidate_depth
         self.rrf_k = rrf_k
+        self.fusion = fusion
+        self.dense_weight = dense_weight
         self._bm25: Optional[BM25Index] = None
         self._bm25_size = -1
 
@@ -126,9 +209,23 @@ class HybridRetriever(BaseRetriever):
         bm25 = self._bm25_index()
 
         nodes = {hit.node.node_id: hit.node for hit in dense_hits}
-        rankings = [[hit.node.node_id for hit in dense_hits], bm25.rank(query_bundle.query_str, depth)]
-        scores = rrf_scores(rankings, self.rrf_k)
-        fused = reciprocal_rank_fusion(rankings, self.similarity_top_k, self.rrf_k)
+        keyword_ids = bm25.rank(query_bundle.query_str, depth)
+        if self.fusion == "rrf":
+            rankings = [[hit.node.node_id for hit in dense_hits], keyword_ids]
+            scores = rrf_scores(rankings, self.rrf_k)
+            fused = reciprocal_rank_fusion(rankings, self.similarity_top_k, self.rrf_k)
+        else:
+            dense = {hit.node.node_id: chroma_score_to_dense(hit.score) for hit in dense_hits}
+            # Dense search embedded the query into the bundle; reuse it to score the
+            # chunks only BM25 found from their stored embeddings, so every candidate
+            # gets an exact dense score
+            if query_bundle.embedding is not None:
+                bm25_only = [cid for cid in keyword_ids if cid not in dense]
+                dense.update(stored_dense_scores(self.collection, query_bundle.embedding, bm25_only))
+            # Exact BM25 scores for every candidate, dense-only ones included
+            keyword = bm25.scores_for(query_bundle.query_str, list(dense) + keyword_ids)
+            scores = fused_scores(dense, keyword, self.dense_weight)
+            fused = sorted(scores, key=lambda cid: (-scores[cid], cid))[: self.similarity_top_k]
         return [
             NodeWithScore(node=nodes.get(node_id) or bm25.by_id[node_id], score=scores[node_id])
             for node_id in fused

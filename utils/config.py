@@ -31,6 +31,8 @@ class AppConfig:
     retrieval_mode: str = "hybrid"
     reranker: str = ""
     rerank_candidates: int = 10
+    hybrid_fusion: str = "score"
+    hybrid_dense_weight: float = 0.7
 
     @classmethod
     def from_env(cls) -> "AppConfig":
@@ -49,4 +51,6 @@ class AppConfig:
             retrieval_mode=os.getenv("RETRIEVAL_MODE") or defaults.retrieval_mode,
             reranker=os.getenv("RERANKER") or defaults.reranker,
             rerank_candidates=_int_env("RERANK_CANDIDATES", defaults.rerank_candidates),
+            hybrid_fusion=os.getenv("HYBRID_FUSION") or defaults.hybrid_fusion,
+            hybrid_dense_weight=_float_env("HYBRID_DENSE_WEIGHT", defaults.hybrid_dense_weight),
         )

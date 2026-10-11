@@ -31,7 +31,7 @@ Documents are processed through the following workflow:
 ### Retrieval and Response Generation
 
 When a user asks a question:
-1. Hybrid search finds the 3 most relevant chunks: BM25 keyword search and dense vector search each rank the stored chunks, and their rankings are fused with reciprocal rank fusion (set `RETRIEVAL_MODE=dense` for vector search only)
+1. Hybrid search finds the 3 most relevant chunks: BM25 keyword search and dense vector search each score the stored chunks, and the two scores are fused, 70% dense and 30% BM25 after scaling each to 0-1 per question (see [Fusing BM25 and dense](#fusing-bm25-and-dense); set `RETRIEVAL_MODE=dense` for vector search only)
 2. Retrieved chunks are used as context for the OpenAI LLM (gpt-4o-mini)
 3. The model answers only from that context; when the chunks hold nothing relevant it replies "I don't know based on the provided documents." instead of guessing
 4. Both the answer and source references are displayed to the user
@@ -61,7 +61,7 @@ Faithfulness runs the app's own `QueryEngine` (top 3, `compact` mode) over a see
 
 - `bm25`: lexical baseline (`rank-bm25`), runs offline with no API key.
 - `dense`: the app's stack, OpenAI `text-embedding-3-small` into ChromaDB.
-- `hybrid`: reciprocal rank fusion of the two (k = 60, 50 candidates each; [Cormack et al., 2009](https://plg.uwaterloo.ca/~gvcormac/cormacksigir09-rrf.pdf)). This is the app's default retriever; both use the same code in `utils/retrieval.py`.
+- `hybrid`: the app's default retriever, the same code as the app in `utils/retrieval.py`. By default it fuses scores (`--fusion score`, `--dense-weight 0.7`); `--fusion rrf` gives the former reciprocal rank fusion (k = 60, 50 candidates each; [Cormack et al., 2009](https://plg.uwaterloo.ca/~gvcormac/cormacksigir09-rrf.pdf)).
 - `rerank`: hybrid's top 10 reordered by the optional cross-encoder (`--reranker minilm`, needs `requirements-rerank.txt`); the same code as the app's `RERANKER`, in `utils/reranking.py`.
 
 ### Baseline results
@@ -72,9 +72,10 @@ Retrieval moved by at most 0.002 across the fixes, so one table, from the latest
 
 | Retriever | recall@1 | recall@3 | recall@5 | recall@10 | MRR@10 |
 |---|---|---|---|---|---|
-| bm25 | 0.773 | **0.910** | **0.943** | 0.969 | **0.847** |
+| bm25 | **0.773** | 0.910 | 0.943 | 0.969 | **0.847** |
 | dense (app default before hybrid) | 0.544 | 0.774 | 0.844 | 0.916 | 0.673 |
-| hybrid (RRF, app default) | 0.700 | 0.890 | 0.939 | **0.975** | 0.802 |
+| hybrid, RRF (former default) | 0.700 | 0.890 | 0.939 | 0.975 | 0.802 |
+| hybrid, score fusion (app default) | 0.752 | **0.917** | **0.953** | **0.978** | 0.839 |
 
 Answer quality, 100 sampled questions through the app's `QueryEngine` (top 3, `gpt-4o-mini`, judged by `gpt-4o-mini`):
 
@@ -83,9 +84,10 @@ Answer quality, 100 sampled questions through the app's `QueryEngine` (top 3, `g
 | Before #2 (temperature 0.7) | dense | 0.960 | 95.5% | 12 / 100 | 0.67 | 0.72 |
 | After #2 and #4 (temperature 0.0) | dense | 0.971 | 96.6% | 13 / 100 | 0.65 | 0.73 |
 | Hybrid app, same-day dense rerun | dense | 0.977 | 97.7% | 13 / 100 | 0.65 | 0.73 |
-| Hybrid app | **hybrid** | **1.000** | **100%** | 5 / 100 | **0.77** | **0.87** |
+| Hybrid app | hybrid, RRF | 1.000 | 100% | 5 / 100 | 0.77 | 0.87 |
+| Score-fusion app | **hybrid, score fusion** | **1.000** | **100%** | 5 / 100 | **0.84** | **0.94** |
 
-The last two rows are the same 100 seeded questions on the same code, with only `--retrieval-mode` changed. Differences between the dense runs are within noise for n = 100; the hybrid gain is not.
+The dense rerun and the RRF row are the same 100 seeded questions on the same code, with only `--retrieval-mode` changed; the score-fusion row is the same questions with the shipped prompt and fusion. Differences between the dense runs are within noise for n = 100; the hybrid gains are not.
 
 What the numbers say:
 
@@ -103,7 +105,7 @@ What the numbers say:
   With hybrid retrieval the default prompt already stayed faithful, so the gain is consistency rather than accuracy; the recall difference is two questions, within noise. The first draft was too cautious: it declined 5 questions whose answer it had been given, 4 of which the default answered correctly, so it was not shipped. "Answered without the gold chunk" counts strict span matches only, and the judge found every such answer supported by the retrieved text.
 - **The judge is noisy at the edges.** Before the fixes it marked one correct, in-context answer unsupported; after, it split one fact into two claims and graded them differently. Treat single-example scores with care and compare aggregate runs.
 
-Raw output lives in [`evaluation/results/`](evaluation/results/): `bm25_baseline.json` (offline run), `baseline.json` (before #2), `baseline_postfix.json` (after #2 and #4) `hybrid_app.json` (dense vs hybrid app, same questions) and `abstain_prompt.json` (answer prompt comparison). A full run costs well under $1 (about 0.5M embedding tokens plus 200 `gpt-4o-mini` calls).
+Raw output lives in [`evaluation/results/`](evaluation/results/): `bm25_baseline.json` (offline run), `baseline.json` (before #2), `baseline_postfix.json` (after #2 and #4) `hybrid_app.json` (dense vs hybrid app, same questions), `score_fusion.json` (score fusion on both datasets) and `abstain_prompt.json` (answer prompt comparison). A full run costs well under $1 (about 0.5M embedding tokens plus 200 `gpt-4o-mini` calls).
 
 ### Second dataset: Natural Questions
 
@@ -127,10 +129,11 @@ BM25 loses 18 points of recall@3 on real queries. Part of that is the larger cor
 | NQ retriever | recall@1 | recall@3 | recall@5 | recall@10 | MRR@10 |
 |---|---|---|---|---|---|
 | bm25 | 0.610 | 0.733 | 0.774 | 0.820 | 0.680 |
-| dense | **0.812** | **0.919** | **0.943** | **0.966** | **0.869** |
-| hybrid (app default) | 0.722 | 0.842 | 0.876 | 0.921 | 0.790 |
+| dense | **0.811** | **0.918** | **0.942** | **0.965** | **0.868** |
+| hybrid, RRF (former default) | 0.722 | 0.842 | 0.876 | 0.921 | 0.790 |
+| hybrid, score fusion (app default) | 0.791 | 0.900 | 0.930 | 0.961 | 0.852 |
 
-**On questions phrased the way users phrase them, dense retrieval beats hybrid by 7.7 points of recall@3**, because equal-weight fusion lets the weak BM25 ranking pull good dense hits down. On SQuAD it is the reverse (hybrid 0.891, dense 0.773). The app's hybrid default therefore suits keyword-style questions and costs recall on natural ones; weighting the fusion toward dense is the next thing to measure on both datasets.
+**On questions phrased the way users phrase them, dense retrieval beat the former RRF hybrid by 7.7 points of recall@3**, because equal-weight rank fusion lets the weak BM25 ranking pull good dense hits down. On SQuAD it is the reverse (hybrid 0.891, dense 0.774). Score fusion, the app's default now, closes most of that gap: 1.8 points behind dense on NQ, and the best recall@3 of any retriever on SQuAD. See [Fusing BM25 and dense](#fusing-bm25-and-dense).
 
 To reproduce (needs `OPENAI_API_KEY`; about 0.9M embedding tokens, a few cents, plus 200 `gpt-4o-mini` calls for the answer run):
 
@@ -140,6 +143,33 @@ python -m evaluation.run --dataset nq --retrievers bm25,dense,hybrid --faithfuln
 ```
 
 Raw output of the BM25 run: [`evaluation/results/nq_bm25_baseline.json`](evaluation/results/nq_bm25_baseline.json).
+
+### Fusing BM25 and dense
+
+The two datasets disagree about BM25: it is the strongest single retriever on SQuAD and the weakest on NQ, so the way hybrid combines it with dense decides which kind of question the app serves well.
+
+**Rejected: down-weighting BM25 in rank fusion.** Weighted RRF (BM25's 1/(k + rank) terms multiplied by a weight below 1; measured with a `--bm25-weights` sweep that is not part of the harness) only trades one dataset for the other. Every lower weight helps NQ and hurts SQuAD, and none comes near dense on NQ or equal-weight RRF on SQuAD. Rank fusion cannot tell a decisive keyword match from a weak one, because both arrive as a rank. recall@3, all questions:
+
+| BM25 weight in RRF | SQuAD | NQ |
+|---|---|---|
+| 1 (former default) | 0.891 | 0.842 |
+| 0.5 | 0.864 | 0.857 |
+| 0.33 | 0.849 | 0.869 |
+| 0.25 | 0.840 | 0.877 |
+| dense alone, for reference | 0.774 | 0.919 |
+
+**Shipped: score fusion.** For each question, the dense and BM25 scores of every candidate (the union of each retriever's top 50) are scaled to 0-1 and summed with weights. A strong keyword match can then lift a chunk, while weak keyword matches barely move the dense order. Every candidate gets an exact score from both sides: chunks only BM25 found are scored against the query embedding from their vectors stored in Chroma, so there is no second embedding call. The dense weight, recall@3 on all questions:
+
+| Dense weight | SQuAD | NQ |
+|---|---|---|
+| 1.0 (dense only) | 0.774 | 0.919 |
+| 0.9 | 0.845 | 0.921 |
+| 0.8 | 0.892 | 0.916 |
+| **0.7 (default)** | **0.917** | **0.900** |
+| 0.6 | 0.930 | 0.881 |
+| 0.5 | 0.933 | 0.857 |
+
+0.7 has the smallest worst-case loss: within 1.6 points of the best weight on SQuAD and 2.1 on NQ. Against the former RRF default it gains 2.6 points on SQuAD and 5.8 on NQ, and through the app (same 100 questions per dataset) context has the answer rises from 0.87 to 0.94 on SQuAD and from 0.85 to 0.90 on NQ, with faithfulness 1.000 on both. The extra Chroma lookup and scaling cost about 1.5-3 ms per query over RRF (7.2 vs 5.8 ms on SQuAD, 15.0 vs 12.1 ms on NQ). The weight was chosen on these two datasets, so treat the margins as optimistic; `HYBRID_DENSE_WEIGHT` and `HYBRID_FUSION=rrf` let you change it. The 0.7 row is the shipped code's own run ([`evaluation/results/score_fusion.json`](evaluation/results/score_fusion.json)); the other weights come from a one-off sweep with the same exact scoring.
 
 ### Running it
 
@@ -243,7 +273,9 @@ All settings are optional environment variables, read at startup (see `.env.exam
 | `EMBEDDING_MODEL` | text-embedding-3-small | OpenAI embedding model |
 | `LLM_MODEL` | gpt-4o-mini | OpenAI model used to answer |
 | `LLM_TEMPERATURE` | 0.0 | Kept at 0 so answers stay grounded and repeatable |
-| `RETRIEVAL_MODE` | hybrid | `hybrid` (BM25 + dense, fused with RRF) or `dense` (vector search only) |
+| `RETRIEVAL_MODE` | hybrid | `hybrid` (BM25 + dense, fused) or `dense` (vector search only) |
+| `HYBRID_FUSION` | score | How hybrid fuses BM25 and dense: `score` (weighted sum of per-query scaled scores) or `rrf` (reciprocal rank fusion, the former default) |
+| `HYBRID_DENSE_WEIGHT` | 0.7 | Weight on dense in score fusion, 0 to 1; BM25 gets the rest |
 | `RERANKER` | off | `minilm` reranks the retrieved candidates with a cross-encoder before the top 3 go to the LLM. Optional extra, see [Optional reranker](#optional-reranker) |
 | `RERANK_CANDIDATES` | 10 | Chunks retrieved for the reranker to choose from |
 
@@ -270,11 +302,11 @@ Measured with `--retrievers rerank --reranker minilm` (recall@3, every evaluated
 | Retrieval | SQuAD | NQ |
 |---|---|---|
 | dense | 0.773 | **0.919** |
-| hybrid (app default) | 0.891 | 0.842 |
-| hybrid + reranker | **0.911** | 0.874 |
+| hybrid, RRF | 0.891 | 0.842 |
+| hybrid, RRF + reranker | **0.911** | 0.874 |
 | dense + reranker (`--rerank-base dense`) | 0.866 | 0.897 |
 
-The reranker improves hybrid on both datasets (+2.0 and +3.2 points) and lifts SQuAD answers through the app (context has the answer 0.87 to 0.93, answer recall 0.79 to 0.83, same 100 questions). No configuration wins both datasets: on NQ, dense alone stays best and reranking its candidates costs 2.1 points, likely because this MS MARCO-trained model handles NQ's tables and lists less well than the embeddings do. Larger rerankers did not help in a 2,000-question trial (MiniLM-L-12: same recall@3; bge-reranker-base: 0.814 on SQuAD). Raw output: [`evaluation/results/reranker.json`](evaluation/results/reranker.json).
+These were measured on the RRF hybrid, before score fusion became the default. The reranker improves it on both datasets (+2.0 and +3.2 points) and lifts SQuAD answers through the app (context has the answer 0.87 to 0.93, answer recall 0.79 to 0.83, same 100 questions). No configuration wins both datasets: on NQ, dense alone stays best and reranking its candidates costs 2.1 points, likely because this MS MARCO-trained model handles NQ's tables and lists less well than the embeddings do. Larger rerankers did not help in a 2,000-question trial (MiniLM-L-12: same recall@3; bge-reranker-base: 0.814 on SQuAD). Raw output: [`evaluation/results/reranker.json`](evaluation/results/reranker.json).
 
 ## Running Tests
 

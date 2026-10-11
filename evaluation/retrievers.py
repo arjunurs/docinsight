@@ -12,10 +12,18 @@ app's hybrid QueryEngine uses too, so these rankings match the app's.
 from __future__ import annotations
 
 import uuid
-from typing import List, Protocol, Sequence
+from typing import Iterator, List, Protocol, Sequence, Tuple
 
 from evaluation.chunking import Chunk
-from utils.retrieval import CANDIDATE_DEPTH, BM25Index, reciprocal_rank_fusion
+from utils.retrieval import (
+    CANDIDATE_DEPTH,
+    DENSE_WEIGHT,
+    FUSION_MODES,
+    BM25Index,
+    reciprocal_rank_fusion,
+    score_fusion,
+    stored_dense_scores,
+)
 
 __all__ = ["BM25Retriever", "DenseRetriever", "HybridRetriever", "RerankRetriever", "reciprocal_rank_fusion"]
 
@@ -91,25 +99,58 @@ class DenseRetriever:
         )
 
     def retrieve_batch(self, questions: Sequence[str], k: int) -> List[List[str]]:
-        results: List[List[str]] = []
+        return [[cid for cid, _ in hits] for hits, _ in self.search_batch(questions, k)]
+
+    def search_batch(self, questions: Sequence[str], k: int) -> Iterator[Tuple[List[Tuple[str, float]], List[float]]]:
+        """
+        Per question, in order: the top-k (chunk id, dense score), best first, and
+        the query embedding. The score is minus Chroma's squared L2 distance, as
+        the app uses. Yields batch by batch, so only one batch of query
+        embeddings is held in memory at a time.
+        """
         for i in range(0, len(questions), self.batch_size):
             batch = list(questions[i : i + self.batch_size])
             embeddings = self.embed_model.get_text_embedding_batch(batch)
             response = self.collection.query(query_embeddings=embeddings, n_results=k)
-            results.extend(response["ids"])
-        return results
+            for ids, distances, embedding in zip(response["ids"], response["distances"], embeddings):
+                yield [(cid, -dist) for cid, dist in zip(ids, distances)], embedding
 
 
 class HybridRetriever:
     name = "hybrid"
 
-    def __init__(self, retrievers: Sequence[Retriever], candidate_depth: int = CANDIDATE_DEPTH):
+    def __init__(
+        self,
+        retrievers: Sequence[Retriever],
+        candidate_depth: int = CANDIDATE_DEPTH,
+        fusion: str = "score",
+        dense_weight: float = DENSE_WEIGHT,
+    ):
+        """retrievers: the bm25 and dense retrievers, fused the way the app's HybridRetriever fuses them."""
+        if fusion not in FUSION_MODES:
+            raise ValueError(f"fusion must be one of {FUSION_MODES}, got {fusion!r}")
         self.retrievers = retrievers
         self.candidate_depth = candidate_depth
+        self.fusion = fusion
+        self.dense_weight = dense_weight
 
     def retrieve_batch(self, questions: Sequence[str], k: int) -> List[List[str]]:
+        depth = max(k, self.candidate_depth)
+        if self.fusion == "score":
+            by_name = {r.name: r for r in self.retrievers}
+            bm25, dense = by_name["bm25"].index, by_name["dense"]
+            results = []
+            for question, (hits, embedding) in zip(questions, dense.search_batch(questions, depth)):
+                dense_scores = dict(hits)
+                keyword_ids = bm25.rank(question, depth)
+                # As in the app: exact dense scores for chunks only BM25 found, from stored embeddings
+                bm25_only = [cid for cid in keyword_ids if cid not in dense_scores]
+                dense_scores.update(stored_dense_scores(dense.collection, embedding, bm25_only))
+                keyword = bm25.scores_for(question, list(dense_scores) + keyword_ids)
+                results.append(score_fusion(dense_scores, keyword, k, self.dense_weight))
+            return results
         per_retriever = [
-            r.retrieve_batch(questions, max(k, self.candidate_depth)) for r in self.retrievers
+            r.retrieve_batch(questions, depth) for r in self.retrievers
         ]
         return [
             reciprocal_rank_fusion([rankings[i] for rankings in per_retriever], k)

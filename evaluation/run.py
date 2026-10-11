@@ -32,6 +32,7 @@ from evaluation.retrievers import BM25Retriever, DenseRetriever, HybridRetriever
 from utils.config import AppConfig
 from utils.query_engine import RETRIEVAL_MODES
 from utils.reranking import build_reranker, reranker_key
+from utils.retrieval import FUSION_MODES
 
 RETRIEVER_CHOICES = ("bm25", "dense", "hybrid", "rerank")
 PROMPTS = ("grounded", "default")
@@ -67,6 +68,10 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
     parser.add_argument("--judge-model", default="gpt-4o-mini")
     parser.add_argument("--retrieval-mode", choices=RETRIEVAL_MODES, default=app.retrieval_mode,
                         help="Retriever the app's QueryEngine uses for the faithfulness run")
+    parser.add_argument("--fusion", choices=FUSION_MODES, default=app.hybrid_fusion,
+                        help="How hybrid fuses BM25 and dense: score (weighted, normalized scores) or rrf")
+    parser.add_argument("--dense-weight", type=float, default=app.hybrid_dense_weight,
+                        help="Weight on dense in score fusion, 0 to 1")
     parser.add_argument("--reranker", default=app.reranker, metavar="NAME",
                         help="Cross-encoder for the rerank retriever and the faithfulness run "
                              "(minilm; needs requirements-rerank.txt). Default: the app's RERANKER, off if unset")
@@ -99,6 +104,8 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
     if "rerank" in args.retrievers and not reranker_key(args.reranker):
         parser.error("--retrievers rerank needs --reranker (for example --reranker minilm)")
     # The app's QueryEngine never reranks fewer candidates than the 3 chunks it sends to the LLM
+    if not 0.0 <= args.dense_weight <= 1.0:
+        parser.error("--dense-weight must be between 0 and 1")
     if args.rerank_candidates < 3:
         parser.error("--rerank-candidates must be at least 3 (the chunks sent to the LLM)")
     if args.faithfulness and not {"dense", "hybrid", "rerank"} & set(args.retrievers):
@@ -151,6 +158,8 @@ def evaluate_faithfulness(
         retrieval_mode=args.retrieval_mode,
         reranker=reranker,
         rerank_candidates=args.rerank_candidates,
+        fusion=args.fusion,
+        dense_weight=args.dense_weight,
         **prompts,
     )
 
@@ -197,6 +206,8 @@ def evaluate_faithfulness(
             ),
             "no_answer_rate": mean(1.0 if e["no_answer"] else 0.0 for e in examples),
             "retrieval_mode": args.retrieval_mode,
+            "fusion": args.fusion,
+            "dense_weight": args.dense_weight if args.fusion == "score" else None,
             "prompt": args.prompt,
             "reranker": args.reranker or None,
             "rerank_candidates": engine.rerank_candidates if engine.reranker is not None else None,
@@ -250,7 +261,9 @@ def main(argv: List[str] = None) -> Dict:
     if "dense" in args.retrievers or needs_hybrid or "rerank" in args.retrievers:
         built["dense"] = DenseRetriever(chunks, embedding_model=args.embedding_model)
     if needs_hybrid:
-        built["hybrid"] = HybridRetriever([built["bm25"], built["dense"]])
+        built["hybrid"] = HybridRetriever(
+            [built["bm25"], built["dense"]], fusion=args.fusion, dense_weight=args.dense_weight
+        )
     if "rerank" in args.retrievers:
         base = built[args.rerank_base]
         built["rerank"] = RerankRetriever(base, chunks, reranker, args.rerank_candidates)
@@ -272,6 +285,10 @@ def main(argv: List[str] = None) -> Dict:
             "chunk_overlap": args.chunk_overlap,
             "embedding_model": args.embedding_model if "dense" in built else None,
             "seed": args.seed,
+            "hybrid_fusion": (
+                {"fusion": args.fusion, "dense_weight": args.dense_weight if args.fusion == "score" else None}
+                if "hybrid" in built else None
+            ),
             "rerank": (
                 {"reranker": args.reranker, "base": args.rerank_base, "candidates": args.rerank_candidates}
                 if "rerank" in built else None

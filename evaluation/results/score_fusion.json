@@ -1,0 +1,138 @@
+{
+ "label": "exact score fusion (dense weight 0.7) as the hybrid default, on SQuAD and Natural Questions",
+ "note": "retrieval over every evaluated question; answer quality on 100 seeded questions per dataset through the app's QueryEngine (hybrid, score fusion, grounded prompt). Per-example records omitted.",
+ "squad": {
+  "run_at": "2026-10-11T01:10:07+00:00",
+  "config": {
+   "dataset": "squad-v1.1-dev",
+   "documents": 48,
+   "chunks": 772,
+   "questions_evaluated": 10570,
+   "questions_skipped": 0,
+   "chunk_size": 512,
+   "chunk_overlap": 50,
+   "embedding_model": "text-embedding-3-small",
+   "seed": 13,
+   "hybrid_fusion": {
+    "fusion": "score",
+    "dense_weight": 0.7
+   },
+   "rerank": null
+  },
+  "retrieval": {
+   "bm25": {
+    "recall@1": 0.7729,
+    "recall@3": 0.9097,
+    "recall@5": 0.9427,
+    "recall@10": 0.9694,
+    "mrr@10": 0.8466,
+    "ms_per_query": 0.7448
+   },
+   "dense": {
+    "recall@1": 0.5447,
+    "recall@3": 0.7735,
+    "recall@5": 0.8438,
+    "recall@10": 0.9151,
+    "mrr@10": 0.6728,
+    "ms_per_query": 4.264
+   },
+   "hybrid": {
+    "recall@1": 0.7523,
+    "recall@3": 0.9171,
+    "recall@5": 0.9533,
+    "recall@10": 0.9778,
+    "mrr@10": 0.8388,
+    "ms_per_query": 7.1565
+   }
+  },
+  "answer_quality": {
+   "n": 100,
+   "faithfulness": 1.0,
+   "fully_faithful_rate": 1.0,
+   "no_claim_answers": 5,
+   "judge_invalid": 0,
+   "answer_recall": 0.84,
+   "token_f1": 0.2731973932778824,
+   "context_has_answer": 0.94,
+   "no_answer_with_answer_in_context": 3,
+   "answered_without_answer_in_context": 4,
+   "no_answer_rate": 0.05,
+   "retrieval_mode": "hybrid",
+   "fusion": "score",
+   "dense_weight": 0.7,
+   "prompt": "grounded",
+   "reranker": null,
+   "rerank_candidates": null,
+   "llm_model": "gpt-4o-mini",
+   "temperature": 0.0,
+   "judge_model": "gpt-4o-mini"
+  }
+ },
+ "nq": {
+  "run_at": "2026-10-11T01:15:54+00:00",
+  "config": {
+   "dataset": "mrqa-nq-dev",
+   "documents": 5332,
+   "chunks": 5670,
+   "questions_evaluated": 4177,
+   "questions_skipped": 0,
+   "chunk_size": 512,
+   "chunk_overlap": 50,
+   "embedding_model": "text-embedding-3-small",
+   "seed": 13,
+   "hybrid_fusion": {
+    "fusion": "score",
+    "dense_weight": 0.7
+   },
+   "rerank": null
+  },
+  "retrieval": {
+   "bm25": {
+    "recall@1": 0.6095,
+    "recall@3": 0.7333,
+    "recall@5": 0.7745,
+    "recall@10": 0.8202,
+    "mrr@10": 0.6805,
+    "ms_per_query": 5.6088
+   },
+   "dense": {
+    "recall@1": 0.8109,
+    "recall@3": 0.9176,
+    "recall@5": 0.9423,
+    "recall@10": 0.9653,
+    "mrr@10": 0.868,
+    "ms_per_query": 4.0228
+   },
+   "hybrid": {
+    "recall@1": 0.7915,
+    "recall@3": 0.9004,
+    "recall@5": 0.9299,
+    "recall@10": 0.9607,
+    "mrr@10": 0.8518,
+    "ms_per_query": 14.9753
+   }
+  },
+  "answer_quality": {
+   "n": 100,
+   "faithfulness": 1.0,
+   "fully_faithful_rate": 1.0,
+   "no_claim_answers": 16,
+   "judge_invalid": 0,
+   "answer_recall": 0.6,
+   "token_f1": 0.26311213459294236,
+   "context_has_answer": 0.9,
+   "no_answer_with_answer_in_context": 7,
+   "answered_without_answer_in_context": 4,
+   "no_answer_rate": 0.13,
+   "retrieval_mode": "hybrid",
+   "fusion": "score",
+   "dense_weight": 0.7,
+   "prompt": "grounded",
+   "reranker": null,
+   "rerank_candidates": null,
+   "llm_model": "gpt-4o-mini",
+   "temperature": 0.0,
+   "judge_model": "gpt-4o-mini"
+  }
+ }
+}
