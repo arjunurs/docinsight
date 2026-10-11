@@ -43,7 +43,8 @@ if "index_manager" not in st.session_state:
         collection_name=config.collection_name,
         embedding_model=config.embedding_model,
         llm_model=config.llm_model,
-        temperature=config.llm_temperature
+        temperature=config.llm_temperature,
+        reasoning_effort=config.llm_reasoning_effort
     )
 if "query_engine" not in st.session_state:
     try:

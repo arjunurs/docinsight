@@ -32,7 +32,7 @@ Documents are processed through the following workflow:
 
 When a user asks a question:
 1. Hybrid search finds the 3 most relevant chunks: BM25 keyword search and dense vector search each score the stored chunks, and the two scores are fused, 70% dense and 30% BM25 after scaling each to 0-1 per question (see [Fusing BM25 and dense](#fusing-bm25-and-dense); set `RETRIEVAL_MODE=dense` for vector search only)
-2. Retrieved chunks are used as context for the OpenAI LLM (gpt-4o-mini)
+2. Retrieved chunks are used as context for the OpenAI LLM (`gpt-6-luna`, reasoning effort `none`)
 3. The model answers only from that context; when the chunks hold nothing relevant it replies "I don't know based on the provided documents." instead of guessing
 4. Both the answer and source references are displayed to the user
 
@@ -77,7 +77,7 @@ Retrieval moved by at most 0.002 across the fixes, so one table, from the latest
 | hybrid, RRF (former default) | 0.700 | 0.890 | 0.939 | 0.975 | 0.802 |
 | hybrid, score fusion (app default) | 0.752 | **0.917** | **0.953** | **0.978** | 0.839 |
 
-Answer quality, 100 sampled questions through the app's `QueryEngine` (top 3, `gpt-4o-mini`, judged by `gpt-4o-mini`):
+Answer quality, 100 sampled questions through the app's `QueryEngine` (top 3, `gpt-4o-mini`, judged by `gpt-4o-mini`; these runs predate the switch to `gpt-6-luna`):
 
 | Run | Retriever | Faithfulness | Fully faithful | No-claim answers | Answer recall | Context has answer |
 |---|---|---|---|---|---|---|
@@ -135,7 +135,7 @@ BM25 loses 18 points of recall@3 on real queries. Part of that is the larger cor
 
 **On questions phrased the way users phrase them, dense retrieval beat the former RRF hybrid by 7.7 points of recall@3**, because equal-weight rank fusion lets the weak BM25 ranking pull good dense hits down. On SQuAD it is the reverse (hybrid 0.891, dense 0.774). Score fusion, the app's default now, closes most of that gap: 1.8 points behind dense on NQ, and the best recall@3 of any retriever on SQuAD. See [Fusing BM25 and dense](#fusing-bm25-and-dense).
 
-To reproduce (needs `OPENAI_API_KEY`; about 0.9M embedding tokens, a few cents, plus 200 `gpt-4o-mini` calls for the answer run):
+To reproduce (needs `OPENAI_API_KEY`; about 0.9M embedding tokens, a few cents, plus 200 answer-model and 200 `gpt-4o-mini` judge calls for the answer run):
 
 ```
 python -m evaluation.run --dataset nq --retrievers bm25,dense,hybrid --faithfulness 100 \
@@ -184,7 +184,7 @@ uv run python -m evaluation.run --retrievers bm25,dense,hybrid --faithfulness 10
     --output evaluation/results/baseline.json
 ```
 
-`--max-articles` (alias `--max-documents`) and `--max-questions` shrink the run for quick iteration; `--chunk-size`, `--chunk-overlap`, `--embedding-model`, `--temperature`, `--judge-model`, `--retrieval-mode` (the retriever the faithfulness run's `QueryEngine` uses, `hybrid` by default), `--prompt` (`grounded`, the app's, or LlamaIndex's `default`), and `--reranker`, `--rerank-candidates` and `--rerank-base` for the optional reranker make it easy to compare variants against the baseline.
+`--max-articles` (alias `--max-documents`) and `--max-questions` shrink the run for quick iteration; `--chunk-size`, `--chunk-overlap`, `--embedding-model`, `--llm-model`, `--reasoning-effort`, `--temperature`, `--judge-model`, `--retrieval-mode` (the retriever the faithfulness run's `QueryEngine` uses, `hybrid` by default), `--prompt` (`grounded`, the app's, or LlamaIndex's `default`), and `--reranker`, `--rerank-candidates` and `--rerank-base` for the optional reranker make it easy to compare variants against the baseline.
 
 ### Caveats
 
@@ -267,8 +267,9 @@ All settings are optional environment variables, read at startup (see `.env.exam
 | `CHUNK_SIZE` | 512 | Tokens per chunk |
 | `CHUNK_OVERLAP` | 50 | Overlapping tokens between chunks |
 | `EMBEDDING_MODEL` | text-embedding-3-small | OpenAI embedding model |
-| `LLM_MODEL` | gpt-4o-mini | OpenAI model used to answer |
-| `LLM_TEMPERATURE` | 0.0 | Kept at 0 so answers stay grounded and repeatable |
+| `LLM_MODEL` | gpt-6-luna | OpenAI model used to answer (`gpt-4o-mini` until October 2026; set it back to reproduce older answer runs) |
+| `LLM_REASONING_EFFORT` | none | Reasoning effort for GPT-5 and later: `none` answers directly, `low`/`medium`/`high` think first at more cost and latency |
+| `LLM_TEMPERATURE` | 0.0 | Older models only, kept at 0 so answers stay grounded and repeatable. LlamaIndex runs reasoning models at 1.0 |
 | `RETRIEVAL_MODE` | hybrid | `hybrid` (BM25 + dense, fused) or `dense` (vector search only) |
 | `HYBRID_FUSION` | score | How hybrid fuses BM25 and dense: `score` (weighted sum of per-query scaled scores) or `rrf` (reciprocal rank fusion, the former default) |
 | `HYBRID_DENSE_WEIGHT` | 0.7 | Weight on dense in score fusion, 0 to 1; BM25 gets the rest |

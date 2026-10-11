@@ -64,7 +64,10 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
     parser.add_argument("--faithfulness", type=int, default=0, metavar="N",
                         help="Generate and judge N answers through the app's QueryEngine (requires dense)")
     parser.add_argument("--llm-model", default=app.llm_model, help="Answer model")
-    parser.add_argument("--temperature", type=float, default=app.llm_temperature, help="Answer temperature")
+    parser.add_argument("--temperature", type=float, default=app.llm_temperature,
+                        help="Answer temperature (older models only; reasoning models run at 1.0)")
+    parser.add_argument("--reasoning-effort", default=app.llm_reasoning_effort,
+                        help="Answer model reasoning effort: none, low, medium, ... (reasoning models only)")
     parser.add_argument("--judge-model", default="gpt-4o-mini")
     parser.add_argument("--retrieval-mode", choices=RETRIEVAL_MODES, default=app.retrieval_mode,
                         help="Retriever the app's QueryEngine uses for the faithfulness run")
@@ -146,8 +149,11 @@ def evaluate_faithfulness(
     from utils.query_engine import QueryEngine
 
     # QueryEngine reads the global Settings, as it does inside the app.
-    Settings.llm = answer_llm or OpenAI(model=args.llm_model, temperature=args.temperature)
+    Settings.llm = answer_llm or OpenAI(
+        model=args.llm_model, temperature=args.temperature, reasoning_effort=args.reasoning_effort or None
+    )
     Settings.embed_model = dense.embed_model
+    # The judge stays on gpt-4o-mini so faithfulness scores compare across answer models
     judge = judge_llm or OpenAI(model=args.judge_model, temperature=0.0)
     # Same engine and retriever the app builds; hybrid fuses BM25 over the stored chunks
     prompts = {}
@@ -213,6 +219,7 @@ def evaluate_faithfulness(
             "rerank_candidates": engine.rerank_candidates if engine.reranker is not None else None,
             "llm_model": args.llm_model,
             "temperature": args.temperature,
+            "reasoning_effort": args.reasoning_effort or None,
             "judge_model": args.judge_model,
         },
         "examples": examples,

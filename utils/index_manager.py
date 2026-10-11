@@ -22,8 +22,9 @@ class IndexManager:
         persist_dir: str = "./data/chroma",
         collection_name: str = "document_collection",
         embedding_model: str = "text-embedding-3-small",
-        llm_model: str = "gpt-4o-mini",
-        temperature: float = 0.0
+        llm_model: str = "gpt-6-luna",
+        temperature: float = 0.0,
+        reasoning_effort: str = "none"
     ):
         """
         Initialize the index manager with the specified parameters.
@@ -33,13 +34,16 @@ class IndexManager:
             collection_name: Name of the ChromaDB collection
             embedding_model: Name of the OpenAI embedding model to use
             llm_model: Name of the OpenAI LLM model to use
-            temperature: Temperature parameter for the LLM (0 keeps answers grounded and repeatable)
+            temperature: Temperature parameter for the LLM (0 keeps answers grounded and repeatable).
+                LlamaIndex pins reasoning models (GPT-5 and later) to 1.0, so it only applies to older models.
+            reasoning_effort: Reasoning effort for reasoning models (none, low, medium, ...); ignored by older models
         """
         self.persist_dir = persist_dir
         self.collection_name = collection_name
         self.embedding_model = embedding_model
         self.llm_model = llm_model
         self.temperature = temperature
+        self.reasoning_effort = reasoning_effort
         
         # Create storage directory if it doesn't exist
         os.makedirs(self.persist_dir, exist_ok=True)
@@ -54,7 +58,11 @@ class IndexManager:
         
         # Initialize embedding and LLM models
         self.embed_model = OpenAIEmbedding(model=self.embedding_model)
-        self.llm = OpenAI(model=self.llm_model, temperature=self.temperature)
+        self.llm = OpenAI(
+            model=self.llm_model,
+            temperature=self.temperature,
+            reasoning_effort=self.reasoning_effort or None
+        )
         
         # Chunking is done by DocumentProcessor; the index only embeds and stores nodes
         Settings.embed_model = self.embed_model

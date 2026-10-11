@@ -23,8 +23,10 @@ class AppConfig:
 
     chunk_size: int = 512
     chunk_overlap: int = 50
-    llm_model: str = "gpt-4o-mini"
+    llm_model: str = "gpt-6-luna"
     llm_temperature: float = 0.0
+    # GPT-5 and later are reasoning models; "none" answers directly, like gpt-4o-mini did
+    llm_reasoning_effort: str = "none"
     embedding_model: str = "text-embedding-3-small"
     persist_dir: str = "./data/chroma"
     collection_name: str = "document_collection"
@@ -45,6 +47,7 @@ class AppConfig:
             chunk_overlap=_int_env("CHUNK_OVERLAP", defaults.chunk_overlap),
             llm_model=os.getenv("LLM_MODEL") or defaults.llm_model,
             llm_temperature=_float_env("LLM_TEMPERATURE", defaults.llm_temperature),
+            llm_reasoning_effort=os.getenv("LLM_REASONING_EFFORT") or defaults.llm_reasoning_effort,
             embedding_model=os.getenv("EMBEDDING_MODEL") or defaults.embedding_model,
             persist_dir=os.getenv("CHROMA_PERSIST_DIR") or defaults.persist_dir,
             collection_name=os.getenv("CHROMA_COLLECTION") or defaults.collection_name,
