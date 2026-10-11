@@ -225,9 +225,10 @@ def test_refine_prompt_keeps_the_grounding_rule_after_a_no_answer(tmp_path):
 
     from utils.prompts import NO_ANSWER, REFINE_PROMPT
 
-    # Room for the refine prompt plus about one chunk, so each chunk gets its own call
+    # Room for the refine prompt plus about one chunk, so each chunk gets its own call.
+    # LlamaIndex also reserves 500 tokens for the answer when packing chunks.
     empty_refine = REFINE_PROMPT.format(context_msg="", query_str="tides and the Moon", existing_answer=NO_ANSWER)
-    window = len(get_tokenizer()(empty_refine)) + 16 + 40
+    window = len(get_tokenizer()(empty_refine)) + 500 + 16 + 40
 
     class RecordingLLM(CustomLLM):
         """Answers NO_ANSWER every time; a small window forces one call per chunk."""

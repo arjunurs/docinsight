@@ -1,0 +1,7 @@
+# The image builds its own .venv from uv.lock; a local one must not overwrite it
+.venv
+.git
+__pycache__
+.pytest_cache
+.env
+data
