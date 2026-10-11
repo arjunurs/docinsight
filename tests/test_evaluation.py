@@ -128,6 +128,10 @@ def test_answer_metrics():
     assert answer_recall("The largest planet is Jupiter.", ["Jupiter"]) == 1.0
     assert answer_recall("Jupiterian moons", ["Jupiter"]) == 0.0
     assert answer_recall("anything", ["the"]) == 0.0
+    # Typographic quotes, dashes and superscripts match their ASCII forms
+    assert answer_recall("It was Brocard’s idea", ["Brocard's"]) == 1.0
+    assert answer_recall("“socialism in one country”", ['"socialism in one country"']) == 1.0
+    assert token_f1("10 m³", ["10 m3"]) == 1.0
 
 
 def test_rrf_prefers_documents_ranked_well_by_both():

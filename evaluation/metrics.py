@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import re
 import string
+import unicodedata
 from collections import Counter
 from typing import Iterable, List, Sequence, Set
 
@@ -31,9 +32,15 @@ def mean(values: Iterable[float]) -> float:
 
 
 def _normalize_answer(text: str) -> List[str]:
-    """SQuAD's official normalization: lowercase, strip punctuation and articles."""
-    text = text.lower()
-    text = "".join(ch for ch in text if ch not in set(string.punctuation))
+    """
+    SQuAD's official normalization (lowercase, strip punctuation and articles), extended to
+    Unicode: newer models write curly quotes, en/em dashes and m³, which the ASCII-only
+    original leaves in place, so "Brocard’s" failed to match "Brocard's".
+    """
+    text = unicodedata.normalize("NFKC", text).lower()
+    text = "".join(
+        ch for ch in text if ch not in set(string.punctuation) and not unicodedata.category(ch).startswith("P")
+    )
     text = re.sub(r"\b(a|an|the)\b", " ", text)
     return text.split()
 
