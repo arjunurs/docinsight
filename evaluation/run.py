@@ -157,6 +157,11 @@ def evaluate_faithfulness(
     from utils.llm import build_llm
     from utils.prompts import is_no_answer
     from utils.query_engine import QueryEngine
+    from utils.tracing import configure_tracing
+
+    # Export the app's query spans like the app does when TRACING (or an OTLP
+    # endpoint) is set; only here, so retrieval-only runs stay quiet
+    configure_tracing()
 
     model = model or args.llm_model
     reasoning_effort = args.reasoning_effort if reasoning_effort is None else reasoning_effort

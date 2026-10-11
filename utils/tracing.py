@@ -99,7 +99,8 @@ def tracing_mode(env: Optional[Dict[str, str]] = None) -> str:
 
 def configure_tracing(mode: Optional[str] = None, exporter: Any = None) -> str:
     """
-    Install a tracer provider that exports spans, once per process. Returns the mode in use.
+    Install a tracer provider that exports spans, once per process (OpenTelemetry
+    allows one). Returns the mode in use.
 
     exporter replaces the one the mode picks (tests pass an in-memory exporter).
     Spans are exported from a background thread (BatchSpanProcessor), so a slow or
@@ -110,9 +111,9 @@ def configure_tracing(mode: Optional[str] = None, exporter: Any = None) -> str:
         if _configured_mode is not None:
             return _configured_mode
         mode = tracing_mode() if mode is None else mode
+        # Nothing to install, so nothing to latch: a later call may still turn exporting on
         if mode == "off" and exporter is None:
-            _configured_mode = "off"
-            return _configured_mode
+            return "off"
 
         from opentelemetry.sdk.resources import SERVICE_NAME, Resource
         from opentelemetry.sdk.trace import TracerProvider
