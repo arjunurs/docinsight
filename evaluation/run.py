@@ -154,9 +154,14 @@ def evaluate_faithfulness(
     )
 
     from evaluation.faithfulness import judge_faithfulness
-    from utils.llm import UsageRecorder, build_llm, cost_usd
+    from utils.llm import build_llm
     from utils.prompts import is_no_answer
     from utils.query_engine import QueryEngine
+    from utils.tracing import configure_tracing
+
+    # Export the app's query spans like the app does when TRACING (or an OTLP
+    # endpoint) is set; only here, so retrieval-only runs stay quiet
+    configure_tracing()
 
     model = model or args.llm_model
     reasoning_effort = args.reasoning_effort if reasoning_effort is None else reasoning_effort
@@ -181,43 +186,34 @@ def evaluate_faithfulness(
 
     sample = random.Random(args.seed).sample(queries, min(args.faithfulness, len(queries)))
     examples = []
-    # Token usage of the answer model only; the judge's calls happen outside recording()
-    recorder = UsageRecorder().attach()
-    try:
-        for i, query in enumerate(sample, start=1):
-            with recorder.recording() as calls:
-                started = time.perf_counter()
-                response = engine.query(query.question)
-                latency_ms = 1000 * (time.perf_counter() - started)
-            input_tokens = sum(c.input_tokens for c in calls)
-            output_tokens = sum(c.output_tokens for c in calls)
-            call_costs = [cost_usd(model, c) for c in calls]
-            contexts = [n.node.get_content() for n in response.source_nodes]
-            source_ids = [n.node.node_id for n in response.source_nodes]
-            result = judge_faithfulness(judge, query.question, response.response, contexts)
-            examples.append({
-                "query_id": query.query_id,
-                "question": query.question,
-                "gold_answers": list(query.answers),
-                "answer": response.response,
-                "source_chunk_ids": source_ids,
-                "context_has_answer": any(cid in relevant[query.query_id] for cid in source_ids),
-                "no_answer": is_no_answer(response.response),
-                "faithfulness": result.score,
-                "claims": result.claims,
-                "judge_invalid": result.invalid,
-                "answer_recall": answer_recall(response.response, query.answers),
-                "token_f1": token_f1(response.response, query.answers),
-                "latency_ms": latency_ms,
-                "llm_calls": len(calls),
-                "input_tokens": input_tokens,
-                "output_tokens": output_tokens,
-                "cost_usd": sum(call_costs) if calls and None not in call_costs else None,
-            })
-            print(f"  faithfulness {i}/{len(sample)}", end="\r", file=sys.stderr)
-    finally:
-        # The handler is global; detach it even when a call fails so it does not outlive the run
-        recorder.detach()
+    # The trace covers the app's query only (retrieval plus the answer model); the
+    # judge's calls happen after it, so they are not counted
+    for i, query in enumerate(sample, start=1):
+        response, trace = engine.query_with_trace(query.question)
+        contexts = [n.node.get_content() for n in response.source_nodes]
+        source_ids = [n.node.node_id for n in response.source_nodes]
+        result = judge_faithfulness(judge, query.question, response.response, contexts)
+        examples.append({
+            "query_id": query.query_id,
+            "question": query.question,
+            "gold_answers": list(query.answers),
+            "answer": response.response,
+            "source_chunk_ids": source_ids,
+            "context_has_answer": any(cid in relevant[query.query_id] for cid in source_ids),
+            "no_answer": is_no_answer(response.response),
+            "faithfulness": result.score,
+            "claims": result.claims,
+            "judge_invalid": result.invalid,
+            "answer_recall": answer_recall(response.response, query.answers),
+            "token_f1": token_f1(response.response, query.answers),
+            "latency_ms": trace.total_ms,
+            "stages_ms": trace.stages_ms,
+            "llm_calls": len(trace.llm_calls),
+            "input_tokens": trace.input_tokens,
+            "output_tokens": trace.output_tokens,
+            "cost_usd": trace.cost_usd,
+        })
+        print(f"  faithfulness {i}/{len(sample)}", end="\r", file=sys.stderr)
 
     scored = [e["faithfulness"] for e in examples if e["faithfulness"] is not None]
     latencies = sorted(e["latency_ms"] for e in examples)
@@ -244,6 +240,11 @@ def evaluate_faithfulness(
             "ms_per_query": mean(latencies),
             "ms_per_query_p50": percentile(latencies, 50),
             "ms_per_query_p95": percentile(latencies, 95),
+            # Median wall clock of each traced stage (retrieval.embed_query, llm.answer, ...)
+            "stage_ms_p50": {
+                name: percentile((e["stages_ms"][name] for e in examples if name in e["stages_ms"]), 50)
+                for name in dict.fromkeys(name for e in examples for name in e["stages_ms"])
+            },
             "input_tokens_per_query": mean(e["input_tokens"] for e in examples),
             "output_tokens_per_query": mean(e["output_tokens"] for e in examples),
             # Answer model only, at list prices (utils/llm.py PRICES); None for unpriced models
