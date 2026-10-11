@@ -230,7 +230,9 @@ def test_refine_prompt_keeps_the_grounding_rule_after_a_no_answer(tmp_path):
 
         @property
         def metadata(self) -> LLMMetadata:
-            return LLMMetadata(context_window=160, num_output=16)
+            # LlamaIndex reserves 500 tokens for the answer when packing chunks,
+            # so this leaves room for about one chunk per call.
+            return LLMMetadata(context_window=655, num_output=16)
 
         @llm_completion_callback()
         def complete(self, prompt: str, formatted: bool = False, **kwargs: Any) -> CompletionResponse:

@@ -74,7 +74,7 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
                         help="Weight on dense in score fusion, 0 to 1")
     parser.add_argument("--reranker", default=app.reranker, metavar="NAME",
                         help="Cross-encoder for the rerank retriever and the faithfulness run "
-                             "(minilm; needs requirements-rerank.txt). Default: the app's RERANKER, off if unset")
+                             "(minilm; needs uv sync --extra rerank). Default: the app's RERANKER, off if unset")
     parser.add_argument("--rerank-candidates", type=int, default=app.rerank_candidates,
                         help="Candidates the reranker chooses from")
     parser.add_argument("--rerank-base", choices=("hybrid", "dense"), default="hybrid",

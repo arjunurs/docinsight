@@ -19,12 +19,40 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: astral-sh/setup-uv@v9.0.0
         with:
-          # Same version as the Docker image
-          python-version: "3.12"
-          cache: pip
-          cache-dependency-path: requirements*.txt
-      - run: pip install -r requirements-dev.txt
+          version: "0.13.0"
+          enable-cache: true
+      # Python version comes from .python-version, the same as the Docker image
+      - run: uv sync --locked
       # Offline: embeddings and LLMs are mocked, so no API key is needed
-      - run: python -m pytest -q tests
+      - run: uv run --locked pytest -q tests
+
+  # The tests above fake the cross-encoder. This installs the locked rerank extra
+  # (CPU-only PyTorch) and scores real pairs with the app's model.
+  rerank-smoke:
+    name: rerank-smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.13.0"
+          enable-cache: true
+      - run: uv sync --locked --no-dev --extra rerank
+      - name: Score with the real cross-encoder
+        run: |
+          uv run --locked --no-dev python - <<'PY'
+          import torch
+          from utils.reranking import RERANKERS, CrossEncoderReranker
+
+          assert torch.__version__.endswith("+cpu"), torch.__version__
+          reranker = CrossEncoderReranker(RERANKERS["minilm"])
+          relevant, unrelated = reranker.score(
+              "What causes the tides?",
+              ["Tides are caused by the gravitational pull of the Moon and the Sun.", "Bees make honey from nectar."],
+          )
+          print(f"torch {torch.__version__}: relevant {relevant:.3f}, unrelated {unrelated:.3f}")
+          assert relevant > unrelated
+          PY

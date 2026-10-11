@@ -62,7 +62,7 @@ Faithfulness runs the app's own `QueryEngine` (top 3, `compact` mode) over a see
 - `bm25`: lexical baseline (`rank-bm25`), runs offline with no API key.
 - `dense`: the app's stack, OpenAI `text-embedding-3-small` into ChromaDB.
 - `hybrid`: the app's default retriever, the same code as the app in `utils/retrieval.py`. By default it fuses scores (`--fusion score`, `--dense-weight 0.7`); `--fusion rrf` gives the former reciprocal rank fusion (k = 60, 50 candidates each; [Cormack et al., 2009](https://plg.uwaterloo.ca/~gvcormac/cormacksigir09-rrf.pdf)).
-- `rerank`: hybrid's top 10 reordered by the optional cross-encoder (`--reranker minilm`, needs `requirements-rerank.txt`); the same code as the app's `RERANKER`, in `utils/reranking.py`.
+- `rerank`: hybrid's top 10 reordered by the optional cross-encoder (`--reranker minilm`, needs the `rerank` extra); the same code as the app's `RERANKER`, in `utils/reranking.py`.
 
 ### Baseline results
 
@@ -174,13 +174,13 @@ The two datasets disagree about BM25: it is the strongest single retriever on SQ
 ### Running it
 
 ```
-pip install -r requirements-dev.txt
-python -m pytest tests                      # offline unit tests
-python -m evaluation.run --retrievers bm25  # offline baseline
-python -m evaluation.run --dataset nq --retrievers bm25  # same on Natural Questions
+uv sync                                     # app + dev dependencies, from uv.lock
+uv run pytest                               # offline unit tests
+uv run python -m evaluation.run --retrievers bm25  # offline baseline
+uv run python -m evaluation.run --dataset nq --retrievers bm25  # same on Natural Questions
 
 # Needs OPENAI_API_KEY (read from .env)
-python -m evaluation.run --retrievers bm25,dense,hybrid --faithfulness 100 \
+uv run python -m evaluation.run --retrievers bm25,dense,hybrid --faithfulness 100 \
     --output evaluation/results/baseline.json
 ```
 
@@ -196,7 +196,7 @@ python -m evaluation.run --retrievers bm25,dense,hybrid --faithfulness 100 \
 
 ### Prerequisites
 
-- Python 3.10+ (3.12 recommended; the Docker image and CI use 3.12)
+- [uv](https://docs.astral.sh/uv/getting-started/installation/), which installs Python 3.12 if needed (the Docker image and CI use 3.12)
 - Docker and Docker Compose (for containerized deployment)
 - OpenAI API key
 
@@ -231,29 +231,25 @@ python -m evaluation.run --retrievers bm25,dense,hybrid --faithfulness 100 \
    cd docinsight
    ```
 
-2. Create a virtual environment:
+2. Install the dependencies. `uv sync` creates `.venv` with Python 3.12 (from `.python-version`) and installs the exact versions in `uv.lock`:
    ```
-   python -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
-   ```
-
-3. Install dependencies:
-   ```
-   pip install -r requirements.txt
+   uv sync
    ```
 
-4. Create a `.env` file with your OpenAI API key:
+3. Create a `.env` file with your OpenAI API key:
    ```
    cp .env.example .env
    # Edit .env with your actual API key
    ```
 
-5. Run the application:
+4. Run the application:
    ```
-   streamlit run app.py
+   uv run streamlit run app.py
    ```
 
-6. Access the application at http://localhost:8501
+5. Access the application at http://localhost:8501
+
+To change dependencies, edit `pyproject.toml` (or use `uv add` / `uv remove`) and commit the updated `uv.lock`; `uv lock --upgrade` moves every package to its latest compatible version.
 
 ## Usage
 
@@ -285,13 +281,15 @@ Indexed documents persist in `data/chroma` and are available again after a resta
 
 ## Optional reranker
 
-A cross-encoder reranker can reorder the retrieved chunks before the top 3 go to the LLM. It is off by default because it needs PyTorch (a few hundred MB with the CPU-only build, over 2 GB with pip's default CUDA build on Linux) and adds about 40-50 ms per question on a laptop CPU.
+A cross-encoder reranker can reorder the retrieved chunks before the top 3 go to the LLM. It is off by default because it needs PyTorch (a few hundred MB with the CPU-only build, over 2 GB with PyPI's default CUDA build on Linux, so on Linux the `rerank` extra takes PyTorch from its CPU-only index) and adds about 40-50 ms per question on a laptop CPU.
 
 ```
-pip install -r requirements-rerank.txt   # sentence-transformers + PyTorch
-RERANKER=minilm streamlit run app.py     # cross-encoder/ms-marco-MiniLM-L-6-v2
+uv sync --extra rerank                          # sentence-transformers + PyTorch
+RERANKER=minilm uv run streamlit run app.py     # cross-encoder/ms-marco-MiniLM-L-6-v2
 EXTRAS=rerank docker-compose up -d --build   # Docker image with CPU-only PyTorch and the model baked in
 ```
+
+PyTorch has published no Intel macOS wheels since 2.3, so the extra installs on Apple silicon, Linux and Windows; on an Intel Mac, use the Docker image.
 
 For Docker, also add `RERANKER=minilm` to `.env`: `EXTRAS` only installs the reranker into the image, and the container reads `RERANKER` at runtime.
 
@@ -311,8 +309,8 @@ These were measured on the RRF hybrid, before score fusion became the default. T
 ## Running Tests
 
 ```
-pip install -r requirements-dev.txt
-pytest
+uv sync
+uv run pytest
 ```
 
 The tests use a mock embedding model and make no OpenAI calls. GitHub Actions runs them on every pull request and on pushes to `main`, on Python 3.12, the same version as the Docker image.

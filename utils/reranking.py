@@ -1,6 +1,6 @@
 """
 Optional cross-encoder reranking. Off by default; enable with RERANKER=minilm
-after installing the extra (pip install -r requirements-rerank.txt).
+after installing the extra (uv sync --extra rerank).
 
 The retriever returns more candidates than the LLM needs (RERANK_CANDIDATES,
 10 by default), a cross-encoder scores each (query, chunk) pair, and only the
@@ -22,7 +22,7 @@ DEFAULT_CANDIDATES = 10
 
 Scorer = Callable[[str, Sequence[str]], List[float]]
 
-MISSING_EXTRA ="Reranking needs the optional extra: pip install -r requirements-rerank.txt"
+MISSING_EXTRA = "Reranking needs the optional extra: uv sync --extra rerank"
 
 
 def _load_cross_encoder(model_name: str) -> Scorer:
