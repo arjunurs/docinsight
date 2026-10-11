@@ -289,6 +289,8 @@ RERANKER=minilm uv run streamlit run app.py     # cross-encoder/ms-marco-MiniLM-
 EXTRAS=rerank docker-compose up -d --build   # Docker image with CPU-only PyTorch and the model baked in
 ```
 
+PyTorch has published no Intel macOS wheels since 2.3, so the extra installs on Apple silicon, Linux and Windows; on an Intel Mac, use the Docker image.
+
 For Docker, also add `RERANKER=minilm` to `.env`: `EXTRAS` only installs the reranker into the image, and the container reads `RERANKER` at runtime.
 
 The retriever returns `RERANK_CANDIDATES` chunks (10 by default), the cross-encoder scores each against the question, and the best 3 go to the LLM. It works with either `RETRIEVAL_MODE`.
