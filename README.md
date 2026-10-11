@@ -182,6 +182,12 @@ uv run python -m evaluation.run --dataset nq --retrievers bm25  # same on Natura
 # Needs OPENAI_API_KEY (read from .env)
 uv run python -m evaluation.run --retrievers bm25,dense,hybrid --faithfulness 100 \
     --output evaluation/results/baseline.json
+
+# Compare answer models on the same questions and retrieved chunks (Claude needs ANTHROPIC_API_KEY);
+# MODEL:EFFORT overrides --reasoning-effort for one model. Prints answer recall, wrong "don't know",
+# faithfulness, latency and cost per 1k queries for each.
+python -m evaluation.run --dataset nq --retrievers hybrid --faithfulness 100 \
+    --llm-model gpt-4o-mini,gpt-6-luna,claude-haiku-5-5
 ```
 
 `--max-articles` (alias `--max-documents`) and `--max-questions` shrink the run for quick iteration; `--chunk-size`, `--chunk-overlap`, `--embedding-model`, `--llm-model`, `--reasoning-effort`, `--temperature`, `--judge-model`, `--retrieval-mode` (the retriever the faithfulness run's `QueryEngine` uses, `hybrid` by default), `--prompt` (`grounded`, the app's, or LlamaIndex's `default`), and `--reranker`, `--rerank-candidates` and `--rerank-base` for the optional reranker make it easy to compare variants against the baseline.
@@ -189,7 +195,7 @@ uv run python -m evaluation.run --retrievers bm25,dense,hybrid --faithfulness 10
 ### Caveats
 
 - SQuAD questions were written by annotators looking at the paragraph, so they share many words with it. That favors BM25, and absolute recall here will be higher than on real user questions. Use the numbers to compare variants, not as a production estimate.
-- The judge defaults to the same model that writes the answers, which can inflate faithfulness. Pass a different `--judge-model` for a stricter check.
+- The judge is `gpt-4o-mini` whatever the answer model, so faithfulness compares across answer models. It is a small judge; pass a stronger `--judge-model` for a stricter check, and re-baseline when you do.
 - The harness chunks once and builds a fresh index per run, so it never measured the double chunking or re-upload duplicates fixed in #2; that is why retrieval numbers did not move.
 
 ## Getting Started
@@ -267,8 +273,8 @@ All settings are optional environment variables, read at startup (see `.env.exam
 | `CHUNK_SIZE` | 512 | Tokens per chunk |
 | `CHUNK_OVERLAP` | 50 | Overlapping tokens between chunks |
 | `EMBEDDING_MODEL` | text-embedding-3-small | OpenAI embedding model |
-| `LLM_MODEL` | gpt-6-luna | OpenAI model used to answer (`gpt-4o-mini` until October 2026; set it back to reproduce older answer runs) |
-| `LLM_REASONING_EFFORT` | none | Reasoning effort for GPT-5 and later: `none` answers directly, `low`/`medium`/`high` think first at more cost and latency |
+| `LLM_MODEL` | gpt-6-luna | Model used to answer: an OpenAI model, or a Claude model (`claude-haiku-5-5`, `claude-sonnet-5-5`, ...; needs `ANTHROPIC_API_KEY`). `gpt-4o-mini` until October 2026; set it back to reproduce older answer runs |
+| `LLM_REASONING_EFFORT` | none | Reasoning effort for current OpenAI and Claude models: `none` answers directly (Claude Haiku 5.5 and Sonnet 5.5 turn thinking off, at effort `low`), `low`/`medium`/`high` think first at more cost and latency. Models that always think (GPT-6.1 Sol, Claude Opus 5.5) need `low` or higher |
 | `LLM_TEMPERATURE` | 0.0 | Older models only, kept at 0 so answers stay grounded and repeatable. LlamaIndex runs reasoning models at 1.0 |
 | `RETRIEVAL_MODE` | hybrid | `hybrid` (BM25 + dense, fused) or `dense` (vector search only) |
 | `HYBRID_FUSION` | score | How hybrid fuses BM25 and dense: `score` (weighted sum of per-query scaled scores) or `rrf` (reciprocal rank fusion, the former default) |

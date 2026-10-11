@@ -7,9 +7,10 @@ from typing import List, Optional, Sequence
 import chromadb
 from llama_index.core import VectorStoreIndex, StorageContext, Settings
 from llama_index.embeddings.openai import OpenAIEmbedding
-from llama_index.llms.openai import OpenAI
 from llama_index.vector_stores.chroma import ChromaVectorStore
 from llama_index.core.schema import BaseNode
+
+from utils.llm import build_llm
 
 
 class IndexManager:
@@ -33,7 +34,7 @@ class IndexManager:
             persist_dir: Directory where ChromaDB data will be stored
             collection_name: Name of the ChromaDB collection
             embedding_model: Name of the OpenAI embedding model to use
-            llm_model: Name of the OpenAI LLM model to use
+            llm_model: Answer model; "claude-..." names use Anthropic, anything else OpenAI
             temperature: Temperature parameter for the LLM (0 keeps answers grounded and repeatable).
                 LlamaIndex pins reasoning models (GPT-5 and later) to 1.0, so it only applies to older models.
             reasoning_effort: Reasoning effort for reasoning models (none, low, medium, ...); ignored by older models
@@ -58,11 +59,7 @@ class IndexManager:
         
         # Initialize embedding and LLM models
         self.embed_model = OpenAIEmbedding(model=self.embedding_model)
-        self.llm = OpenAI(
-            model=self.llm_model,
-            temperature=self.temperature,
-            reasoning_effort=self.reasoning_effort or None
-        )
+        self.llm = build_llm(self.llm_model, self.temperature, self.reasoning_effort)
         
         # Chunking is done by DocumentProcessor; the index only embeds and stores nodes
         Settings.embed_model = self.embed_model

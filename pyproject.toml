@@ -7,6 +7,9 @@ requires-python = ">=3.12"
 dependencies = [
     "llama-index-core>=0.14.25",
     "llama-index-llms-openai>=0.8.2",
+    # Claude answer models (LLM_MODEL=claude-...); embeddings stay on OpenAI
+    "llama-index-llms-anthropic>=0.12.2",
+    "anthropic>=1.13.0",
     "llama-index-embeddings-openai>=0.7.0",
     # Without it SimpleDirectoryReader loads a PDF's raw bytes as text
     "llama-index-readers-file>=0.7.0",

@@ -63,7 +63,9 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
     parser.add_argument("--embedding-model", default=app.embedding_model)
     parser.add_argument("--faithfulness", type=int, default=0, metavar="N",
                         help="Generate and judge N answers through the app's QueryEngine (requires dense)")
-    parser.add_argument("--llm-model", default=app.llm_model, help="Answer model")
+    parser.add_argument("--llm-model", default=app.llm_model,
+                        help="Answer model, or a comma-separated list to compare on the same questions; "
+                             "MODEL:EFFORT sets one model's reasoning effort (claude-... models use Anthropic)")
     parser.add_argument("--temperature", type=float, default=app.llm_temperature,
                         help="Answer temperature (older models only; reasoning models run at 1.0)")
     parser.add_argument("--reasoning-effort", default=app.llm_reasoning_effort,
@@ -111,6 +113,12 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
         parser.error("--dense-weight must be between 0 and 1")
     if args.rerank_candidates < 3:
         parser.error("--rerank-candidates must be at least 3 (the chunks sent to the LLM)")
+    args.answer_models = []
+    for spec in (s.strip() for s in args.llm_model.split(",") if s.strip()):
+        model, _, effort = spec.partition(":")
+        args.answer_models.append((model, effort or args.reasoning_effort))
+    if not args.answer_models:
+        parser.error("--llm-model needs at least one model")
     if args.faithfulness and not {"dense", "hybrid", "rerank"} & set(args.retrievers):
         parser.error("--faithfulness runs the app's QueryEngine on the dense index; add dense to --retrievers")
     return args
@@ -134,7 +142,8 @@ def evaluate_retrieval(retriever, questions, query_ids, relevant, ks) -> Dict:
 
 
 def evaluate_faithfulness(
-    dense: DenseRetriever, queries, relevant, args, answer_llm=None, judge_llm=None, reranker=None
+    dense: DenseRetriever, queries, relevant, args, answer_llm=None, judge_llm=None, reranker=None,
+    model: str = None, reasoning_effort: str = None,
 ) -> Dict:
     from llama_index.core import Settings
     from llama_index.llms.openai import OpenAI
@@ -145,13 +154,14 @@ def evaluate_faithfulness(
     )
 
     from evaluation.faithfulness import judge_faithfulness
+    from utils.llm import UsageRecorder, build_llm, cost_usd
     from utils.prompts import is_no_answer
     from utils.query_engine import QueryEngine
 
+    model = model or args.llm_model
+    reasoning_effort = args.reasoning_effort if reasoning_effort is None else reasoning_effort
     # QueryEngine reads the global Settings, as it does inside the app.
-    Settings.llm = answer_llm or OpenAI(
-        model=args.llm_model, temperature=args.temperature, reasoning_effort=args.reasoning_effort or None
-    )
+    Settings.llm = answer_llm or build_llm(model, args.temperature, reasoning_effort)
     Settings.embed_model = dense.embed_model
     # The judge stays on gpt-4o-mini so faithfulness scores compare across answer models
     judge = judge_llm or OpenAI(model=args.judge_model, temperature=0.0)
@@ -171,8 +181,16 @@ def evaluate_faithfulness(
 
     sample = random.Random(args.seed).sample(queries, min(args.faithfulness, len(queries)))
     examples = []
+    # Token usage of the answer model only; the judge's calls happen outside recording()
+    recorder = UsageRecorder().attach()
     for i, query in enumerate(sample, start=1):
-        response = engine.query(query.question)
+        with recorder.recording() as calls:
+            started = time.perf_counter()
+            response = engine.query(query.question)
+            latency_ms = 1000 * (time.perf_counter() - started)
+        input_tokens = sum(c.input_tokens for c in calls)
+        output_tokens = sum(c.output_tokens for c in calls)
+        call_costs = [cost_usd(model, c) for c in calls]
         contexts = [n.node.get_content() for n in response.source_nodes]
         source_ids = [n.node.node_id for n in response.source_nodes]
         result = judge_faithfulness(judge, query.question, response.response, contexts)
@@ -189,10 +207,19 @@ def evaluate_faithfulness(
             "judge_invalid": result.invalid,
             "answer_recall": answer_recall(response.response, query.answers),
             "token_f1": token_f1(response.response, query.answers),
+            "latency_ms": latency_ms,
+            "llm_calls": len(calls),
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "cost_usd": sum(call_costs) if calls and None not in call_costs else None,
         })
         print(f"  faithfulness {i}/{len(sample)}", end="\r", file=sys.stderr)
 
+    recorder.detach()
+
     scored = [e["faithfulness"] for e in examples if e["faithfulness"] is not None]
+    latencies = sorted(e["latency_ms"] for e in examples)
+    costs = [e["cost_usd"] for e in examples if e["cost_usd"] is not None]
     return {
         "summary": {
             "n": len(examples),
@@ -211,15 +238,23 @@ def evaluate_faithfulness(
                 1 for e in examples if not e["no_answer"] and not e["context_has_answer"]
             ),
             "no_answer_rate": mean(1.0 if e["no_answer"] else 0.0 for e in examples),
+            # Wall clock of the app's query: retrieval plus the answer call(s)
+            "ms_per_query": mean(latencies),
+            "ms_per_query_p50": latencies[len(latencies) // 2],
+            "ms_per_query_p95": latencies[min(len(latencies) - 1, int(0.95 * len(latencies)))],
+            "input_tokens_per_query": mean(e["input_tokens"] for e in examples),
+            "output_tokens_per_query": mean(e["output_tokens"] for e in examples),
+            # Answer model only, at list prices (utils/llm.py PRICES); None for unpriced models
+            "cost_per_1k_queries_usd": 1000 * mean(costs) if costs and len(costs) == len(examples) else None,
             "retrieval_mode": args.retrieval_mode,
             "fusion": args.fusion,
             "dense_weight": args.dense_weight if args.fusion == "score" else None,
             "prompt": args.prompt,
             "reranker": args.reranker or None,
             "rerank_candidates": engine.rerank_candidates if engine.reranker is not None else None,
-            "llm_model": args.llm_model,
+            "llm_model": model,
             "temperature": args.temperature,
-            "reasoning_effort": args.reasoning_effort or None,
+            "reasoning_effort": reasoning_effort or None,
             "judge_model": args.judge_model,
         },
         "examples": examples,
@@ -235,6 +270,31 @@ def format_table(results: Dict[str, Dict]) -> str:
     for name, metrics in results.items():
         cells = " | ".join(f"{metrics[c]:.3f}" for c in columns)
         lines.append(f"| {name} | {cells} | {metrics['ms_per_query']:.1f} |")
+    return "\n".join(lines)
+
+
+MODEL_COLUMNS = (
+    ("answer_recall", "Answer recall", "{:.2f}"),
+    ("no_answer_with_answer_in_context", "Wrong \"don't know\"", "{}"),
+    ("answered_without_answer_in_context", "Answered w/o gold", "{}"),
+    ("faithfulness", "Faithfulness", "{:.3f}"),
+    ("ms_per_query_p50", "p50 ms", "{:.0f}"),
+    ("ms_per_query_p95", "p95 ms", "{:.0f}"),
+    ("output_tokens_per_query", "Out tokens", "{:.0f}"),
+    ("cost_per_1k_queries_usd", "$ / 1k queries", "{:.3f}"),
+)
+
+
+def format_model_table(summaries: Dict[str, Dict]) -> str:
+    lines = [
+        "| Model | " + " | ".join(label for _, label, _ in MODEL_COLUMNS) + " |",
+        "|---|" + "---|" * len(MODEL_COLUMNS),
+    ]
+    for name, summary in summaries.items():
+        cells = [
+            "n/a" if summary.get(key) is None else fmt.format(summary[key]) for key, _, fmt in MODEL_COLUMNS
+        ]
+        lines.append(f"| {name} | " + " | ".join(cells) + " |")
     return "\n".join(lines)
 
 
@@ -305,11 +365,24 @@ def main(argv: List[str] = None) -> Dict:
     }
     print("\n" + format_table(retrieval))
 
-    if args.faithfulness:
-        faithfulness = evaluate_faithfulness(built["dense"], queries, relevant, args, reranker=reranker)
+    if args.faithfulness and len(args.answer_models) == 1:
+        model, effort = args.answer_models[0]
+        faithfulness = evaluate_faithfulness(
+            built["dense"], queries, relevant, args, reranker=reranker, model=model, reasoning_effort=effort
+        )
         output["faithfulness"] = faithfulness
         print(f"\nAnswer quality ({args.retrieval_mode}, {args.prompt} prompt, top-3, app QueryEngine):")
         print(json.dumps(faithfulness["summary"], indent=2))
+    elif args.faithfulness:
+        # Same sampled questions and retrieved chunks for every model; only the answer model changes
+        output["faithfulness_by_model"] = {}
+        for model, effort in args.answer_models:
+            print(f"Answering with {model} (effort {effort or 'default'})...", file=sys.stderr)
+            output["faithfulness_by_model"][f"{model}:{effort}" if effort else model] = evaluate_faithfulness(
+                built["dense"], queries, relevant, args, reranker=reranker, model=model, reasoning_effort=effort
+            )
+        print(f"\nAnswer models ({args.retrieval_mode}, {args.prompt} prompt, top-3, judge {args.judge_model}):")
+        print(format_model_table({k: v["summary"] for k, v in output["faithfulness_by_model"].items()}))
 
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)

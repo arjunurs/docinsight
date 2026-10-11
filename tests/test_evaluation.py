@@ -241,7 +241,23 @@ def test_faithfulness_summary_is_strict_json_when_nothing_is_scored(dataset):
     result = evaluate_faithfulness(dense, dataset.queries, relevant, args, answer_llm, no_claims)
     summary = result["summary"]
     assert summary["faithfulness"] is None and summary["fully_faithful_rate"] is None
+    # The mock reports no token usage, so there is nothing to price
+    assert summary["cost_per_1k_queries_usd"] is None and summary["ms_per_query"] >= 0
     json.dumps(summary, allow_nan=False)
+
+
+def test_cli_compares_answer_models_with_per_model_effort():
+    from evaluation.run import format_model_table, parse_args
+
+    args = parse_args(["--llm-model", "gpt-6-luna, claude-opus-5-5:low", "--reasoning-effort", "none"])
+    assert args.answer_models == [("gpt-6-luna", "none"), ("claude-opus-5-5", "low")]
+
+    table = format_model_table({"gpt-6-luna:none": {
+        "answer_recall": 0.6, "no_answer_with_answer_in_context": 7, "answered_without_answer_in_context": 4,
+        "faithfulness": 1.0, "ms_per_query_p50": 812.4, "ms_per_query_p95": 1500.0,
+        "output_tokens_per_query": 21.0, "cost_per_1k_queries_usd": None,
+    }})
+    assert "| gpt-6-luna:none | 0.60 | 7 | 4 | 1.000 | 812 | 1500 | 21 | n/a |" in table
 
 
 def _mrqa_example(context, qid, question, answer, start):

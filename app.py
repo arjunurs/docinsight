@@ -11,6 +11,7 @@ from dotenv import load_dotenv
 from utils.config import AppConfig
 from utils.document_processor import DocumentProcessor
 from utils.index_manager import IndexManager
+from utils.llm import is_claude
 from utils.query_engine import QueryEngine
 from utils.reranking import build_reranker
 
@@ -32,6 +33,10 @@ The system uses LlamaIndex and the OpenAI API to provide relevant answers based 
 
 # Initialize session state
 config = AppConfig.from_env()
+# Claude answer models also need an Anthropic key (embeddings stay on OpenAI)
+if is_claude(config.llm_model) and os.getenv("ANTHROPIC_API_KEY") is None:
+    st.error(f"LLM_MODEL={config.llm_model} needs ANTHROPIC_API_KEY in the .env file or the environment.")
+    st.stop()
 if "processor" not in st.session_state:
     st.session_state.processor = DocumentProcessor(
         chunk_size=config.chunk_size,
