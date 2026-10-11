@@ -12,7 +12,7 @@ app's hybrid QueryEngine uses too, so these rankings match the app's.
 from __future__ import annotations
 
 import uuid
-from typing import List, Protocol, Sequence, Tuple
+from typing import Iterator, List, Protocol, Sequence, Tuple
 
 from evaluation.chunking import Chunk
 from utils.retrieval import (
@@ -101,19 +101,19 @@ class DenseRetriever:
     def retrieve_batch(self, questions: Sequence[str], k: int) -> List[List[str]]:
         return [[cid for cid, _ in hits] for hits, _ in self.search_batch(questions, k)]
 
-    def search_batch(self, questions: Sequence[str], k: int) -> List[Tuple[List[Tuple[str, float]], List[float]]]:
+    def search_batch(self, questions: Sequence[str], k: int) -> Iterator[Tuple[List[Tuple[str, float]], List[float]]]:
         """
-        Per question: the top-k (chunk id, dense score), best first, and the query
-        embedding. The score is minus Chroma's squared L2 distance, as the app uses.
+        Per question, in order: the top-k (chunk id, dense score), best first, and
+        the query embedding. The score is minus Chroma's squared L2 distance, as
+        the app uses. Yields batch by batch, so only one batch of query
+        embeddings is held in memory at a time.
         """
-        results = []
         for i in range(0, len(questions), self.batch_size):
             batch = list(questions[i : i + self.batch_size])
             embeddings = self.embed_model.get_text_embedding_batch(batch)
             response = self.collection.query(query_embeddings=embeddings, n_results=k)
             for ids, distances, embedding in zip(response["ids"], response["distances"], embeddings):
-                results.append(([(cid, -dist) for cid, dist in zip(ids, distances)], embedding))
-        return results
+                yield [(cid, -dist) for cid, dist in zip(ids, distances)], embedding
 
 
 class HybridRetriever:
