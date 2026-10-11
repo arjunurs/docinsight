@@ -221,7 +221,13 @@ def test_refine_prompt_keeps_the_grounding_rule_after_a_no_answer(tmp_path):
     from llama_index.core.llms import CompletionResponse, CustomLLM, LLMMetadata
     from llama_index.core.llms.callbacks import llm_completion_callback
 
-    from utils.prompts import NO_ANSWER
+    from llama_index.core.utils import get_tokenizer
+
+    from utils.prompts import NO_ANSWER, REFINE_PROMPT
+
+    # Room for the refine prompt plus about one chunk, so each chunk gets its own call
+    empty_refine = REFINE_PROMPT.format(context_msg="", query_str="tides and the Moon", existing_answer=NO_ANSWER)
+    window = len(get_tokenizer()(empty_refine)) + 16 + 40
 
     class RecordingLLM(CustomLLM):
         """Answers NO_ANSWER every time; a small window forces one call per chunk."""
@@ -230,7 +236,7 @@ def test_refine_prompt_keeps_the_grounding_rule_after_a_no_answer(tmp_path):
 
         @property
         def metadata(self) -> LLMMetadata:
-            return LLMMetadata(context_window=160, num_output=16)
+            return LLMMetadata(context_window=window, num_output=16)
 
         @llm_completion_callback()
         def complete(self, prompt: str, formatted: bool = False, **kwargs: Any) -> CompletionResponse:
@@ -256,7 +262,7 @@ def test_refine_prompt_keeps_the_grounding_rule_after_a_no_answer(tmp_path):
         assert refines, mode
         for prompt in refines:
             assert f"We have provided an existing answer: {NO_ANSWER}" in prompt, mode
-            assert "Using only this context and the existing answer" in prompt, mode
+            assert "only the context above, not prior knowledge" in prompt, mode
             assert f'reply exactly: "{NO_ANSWER}"' in prompt, mode
         # The chunk that answers the query reaches the LLM in one of the calls
         assert any("raises ocean tides" in p for p in llm.prompts), mode

@@ -7,14 +7,34 @@ from llama_index.core import PromptTemplate
 # The exact reply for "not in the documents"; the app and the evaluation detect it by this text.
 NO_ANSWER = "I don't know based on the provided documents."
 
+# Rules shared by both prompts. The first version only said "answer if the context
+# answers the query, even partly"; on Natural Questions it still declined 7 of 100
+# questions whose answer chunk was retrieved. NQ questions are search queries, and
+# many answers there have to be read off the context rather than quoted: a row of a
+# flattened table, the latest item in a list, a count, or a fact stated as of the
+# document's date. The rules name those cases so the model treats them as answers,
+# and keep the decline for context that is about something else.
+_ANSWER_RULES = (
+    "Answer the query using only the context above, not prior knowledge.\n"
+    "Queries are often short search phrases (\"actor who plays X\", \"last time Y won\"); "
+    "read them for their plain meaning.\n"
+    "The context counts as answering the query when the answer can be read from it, even if:\n"
+    "- it is worded differently from the query or answers only part of it;\n"
+    "- it sits in a table or list (rows may be flattened onto one line, cells separated by spaces);\n"
+    "- it takes picking an item (the latest, first, largest) or counting entries in the context;\n"
+    "- it is stated as of the document's date (\"currently\", \"latest\"): give it and say so.\n"
+    "If the query depends on today's date (an age, \"how long ago\"), give the dates the context "
+    "states instead of calculating from today.\n"
+)
+
 TEXT_QA_PROMPT = PromptTemplate(
     "Context information from the user's documents is below.\n"
     "---------------------\n"
     "{context_str}\n"
     "---------------------\n"
-    "Answer the query using only the context above, not prior knowledge.\n"
-    "If the context answers the query, even partly or in different words, answer from it.\n"
-    f'Only if the context has nothing that answers the query, reply exactly: "{NO_ANSWER}"\n'
+    + _ANSWER_RULES
+    + "Only if the context is about something else and nothing in it answers the query, "
+    f'reply exactly: "{NO_ANSWER}"\n'
     "Query: {query_str}\n"
     "Answer: "
 )
@@ -26,9 +46,10 @@ REFINE_PROMPT = PromptTemplate(
     "------------\n"
     "{context_msg}\n"
     "------------\n"
-    "Using only this context and the existing answer, refine the answer to better answer the query. "
+    + _ANSWER_RULES
+    + "Refine the existing answer with this context only if it helps. "
     "If the context isn't useful, return the existing answer unchanged. "
-    f'If neither contains the answer, reply exactly: "{NO_ANSWER}"\n'
+    f'If neither the existing answer nor the context answers the query, reply exactly: "{NO_ANSWER}"\n'
     "Refined Answer: "
 )
 
