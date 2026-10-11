@@ -9,7 +9,7 @@ from llama_index.core.base.embeddings.base import BaseEmbedding
 from evaluation.chunking import chunk_documents, label_relevant_chunks
 from evaluation.dataset import build_dataset
 from evaluation.faithfulness import judge_faithfulness, parse_judge_output
-from evaluation.metrics import answer_recall, reciprocal_rank, recall_at_k, token_f1
+from evaluation.metrics import answer_recall, percentile, reciprocal_rank, recall_at_k, token_f1
 from evaluation.retrievers import (
     BM25Retriever,
     DenseRetriever,
@@ -335,3 +335,12 @@ def test_nq_max_documents_drops_questions_with_gold_outside_the_corpus(tmp_path)
     assert len(load_nq(path).queries) == 2
     # The merged question also has gold in the third passage, so only a1 survives.
     assert [q.query_id for q in load_nq(path, max_documents=2).queries] == ["a1"]
+
+
+def test_percentile_uses_nearest_rank():
+    values = list(range(1, 101))
+    assert percentile(values, 50) == 50
+    assert percentile(values, 95) == 95
+    assert percentile(list(range(1, 21)), 95) == 19
+    assert percentile([7], 95) == 7
+    assert math.isnan(percentile([], 95))

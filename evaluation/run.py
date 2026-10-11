@@ -26,7 +26,7 @@ from dotenv import load_dotenv
 
 from evaluation.chunking import chunk_documents, label_relevant_chunks
 from evaluation.dataset import load_squad
-from evaluation.metrics import answer_recall, mean, reciprocal_rank, recall_at_k, token_f1
+from evaluation.metrics import answer_recall, mean, percentile, reciprocal_rank, recall_at_k, token_f1
 from evaluation.nq import load_nq
 from evaluation.retrievers import BM25Retriever, DenseRetriever, HybridRetriever, RerankRetriever
 from utils.config import AppConfig
@@ -240,8 +240,8 @@ def evaluate_faithfulness(
             "no_answer_rate": mean(1.0 if e["no_answer"] else 0.0 for e in examples),
             # Wall clock of the app's query: retrieval plus the answer call(s)
             "ms_per_query": mean(latencies),
-            "ms_per_query_p50": latencies[len(latencies) // 2],
-            "ms_per_query_p95": latencies[min(len(latencies) - 1, int(0.95 * len(latencies)))],
+            "ms_per_query_p50": percentile(latencies, 50),
+            "ms_per_query_p95": percentile(latencies, 95),
             "input_tokens_per_query": mean(e["input_tokens"] for e in examples),
             "output_tokens_per_query": mean(e["output_tokens"] for e in examples),
             # Answer model only, at list prices (utils/llm.py PRICES); None for unpriced models

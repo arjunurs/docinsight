@@ -1,6 +1,7 @@
 """Ranking and answer metrics."""
 from __future__ import annotations
 
+import math
 import re
 import string
 import unicodedata
@@ -29,6 +30,14 @@ def reciprocal_rank(ranked: Sequence[str], relevant: Set[str], k: int) -> float:
 def mean(values: Iterable[float]) -> float:
     values = list(values)
     return sum(values) / len(values) if values else float("nan")
+
+
+def percentile(values: Iterable[float], p: float) -> float:
+    """Nearest-rank percentile: the smallest value with at least p% of values at or below it."""
+    ordered = sorted(values)
+    if not ordered:
+        return float("nan")
+    return ordered[max(0, math.ceil(p / 100 * len(ordered)) - 1)]
 
 
 def _normalize_answer(text: str) -> List[str]:
