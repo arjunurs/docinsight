@@ -12,6 +12,14 @@ from llama_index.core.llms import ChatMessage
 from utils.llm import UsageRecorder, build_llm, cost_usd, usage_from_raw
 
 
+@pytest.fixture(autouse=True)
+def dummy_api_keys(monkeypatch):
+    # The wrappers don't need keys until the first request, but set them so no test
+    # depends on that or picks up a developer's real keys
+    monkeypatch.setenv("OPENAI_API_KEY", "test")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test")
+
+
 def openai_request(model, effort):
     bodies = []
 
