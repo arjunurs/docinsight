@@ -7,13 +7,15 @@ from llama_index.core import PromptTemplate
 # The exact reply for "not in the documents"; the app and the evaluation detect it by this text.
 NO_ANSWER = "I don't know based on the provided documents."
 
-# Rules shared by both prompts. The first version only said "answer if the context
-# answers the query, even partly"; on Natural Questions it still declined 7 of 100
-# questions whose answer chunk was retrieved. NQ questions are search queries, and
-# many answers there have to be read off the context rather than quoted: a row of a
-# flattened table, the latest item in a list, a count, or a fact stated as of the
-# document's date. The rules name those cases so the model treats them as answers;
-# the decline still applies whenever the context does not hold the answer.
+# Rules shared by both prompts. They name answers the model has to read off the
+# context rather than quote (a flattened table row, the latest item in a list, a
+# fact stated as of the document's date). On SQuAD this cut wrong declines from 3
+# to 1 of 100. On Natural Questions 7 of 100 are still declined: each gold chunk
+# answers only indirectly (it never names the film or the show asked about), and
+# gpt-4o-mini declines those whenever the prompt offers a decline. Answering them
+# took a prompt with no decline plus a second LLM call to detect free-text
+# declines, which doubles the calls and added wrong answers, so it was not shipped.
+# See "When the app says it doesn't know" in the README.
 _ANSWER_RULES = (
     "Answer the query using only the context above, not prior knowledge.\n"
     "Queries are often short search phrases (\"actor who plays X\", \"last time Y won\"); "

@@ -1,0 +1,99 @@
+{
+ "label": "wrong 'I don't know' replies on NQ: app runs with the shipped prompt, and a one-off sweep of answer setups",
+ "note": "App runs: 100 seeded questions per dataset through the app's QueryEngine (hybrid, score fusion 0.7, gpt-4o-mini, temperature 0), commit 2fdd3ef; 'was' values from score_fusion.json. Sweep: same retrieved chunks, one-off script outside the harness; set_a = the 7 NQ questions declined with the gold chunk retrieved, set_b = the 16 questions without the gold chunk (10 NQ, 6 SQuAD), set_c = the 1 remaining SQuAD decline. Per-example records omitted.",
+ "app": {
+  "squad": {
+   "faithfulness": 1.0,
+   "answer_recall": 0.85,
+   "no_answer_with_answer_in_context": 1,
+   "answered_without_answer_in_context": 3,
+   "no_answer_rate": 0.04,
+   "no_claim_answers": 4,
+   "context_has_answer": 0.94,
+   "was": {
+    "answer_recall": 0.84,
+    "no_answer_with_answer_in_context": 3,
+    "answered_without_answer_in_context": 4,
+    "no_answer_rate": 0.05
+   }
+  },
+  "nq": {
+   "faithfulness": 1.0,
+   "answer_recall": 0.61,
+   "no_answer_with_answer_in_context": 7,
+   "answered_without_answer_in_context": 4,
+   "no_answer_rate": 0.13,
+   "no_claim_answers": 14,
+   "context_has_answer": 0.9,
+   "was": {
+    "answer_recall": 0.6,
+    "no_answer_with_answer_in_context": 7,
+    "answered_without_answer_in_context": 4,
+    "no_answer_rate": 0.13
+   }
+  }
+ },
+ "nq_declined_with_gold_chunk": [
+  "who is the authority or governing body of mca",
+  "where was part of the classic surfing movie endless summer filmed",
+  "legends of tomorrow season 3 finale air date",
+  "who wrote the theme song to law and order",
+  "who played the princess in kingsman secret service",
+  "who has the oldest team in the nba",
+  "what is the significance of the sahara desert"
+ ],
+ "sweep": {
+  "shipped_grounded": {
+   "set_a_answered": 0,
+   "set_a_correct": 0,
+   "set_b_fixed_declines": 9,
+   "set_b_unsupported": 0,
+   "set_c": "declined"
+  },
+  "llamaindex_default_plus_decline_sentence": {
+   "set_a_answered": 0,
+   "set_a_correct": 0,
+   "set_b_fixed_declines": 10,
+   "set_b_unsupported": 0,
+   "set_c": "declined"
+  },
+  "short_single_message": {
+   "set_a_answered": 0,
+   "set_a_correct": 0,
+   "set_b_fixed_declines": 8,
+   "set_b_unsupported": 0,
+   "set_c": "declined"
+  },
+  "short_split_system_user": {
+   "set_a_answered": 0,
+   "set_a_correct": 0,
+   "set_b_fixed_declines": 10,
+   "set_b_unsupported": 0,
+   "set_c": "declined"
+  },
+  "evidence_first": {
+   "set_a_answered": 0,
+   "set_a_correct": 0,
+   "set_b_fixed_declines": 10,
+   "set_b_unsupported": 1,
+   "set_c": "declined",
+   "format_failures": 0
+  },
+  "llamaindex_default": {
+   "set_a_answered": 7,
+   "set_a_correct": 5,
+   "set_b_fixed_declines": 0,
+   "set_b_free_text_declines": 7,
+   "set_b_unsupported": 0,
+   "set_c": "answered, correct"
+  },
+  "llamaindex_default_plus_refusal_check": {
+   "set_a_answered": 7,
+   "set_a_correct": 5,
+   "set_b_fixed_declines": 7,
+   "set_b_unsupported": 0,
+   "set_c": "declined (hedged correct answer misread)",
+   "extra_llm_calls_per_query": 1
+  }
+ }
+}

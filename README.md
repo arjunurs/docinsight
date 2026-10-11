@@ -105,7 +105,7 @@ What the numbers say:
   With hybrid retrieval the default prompt already stayed faithful, so the gain is consistency rather than accuracy; the recall difference is two questions, within noise. The first draft was too cautious: it declined 5 questions whose answer it had been given, 4 of which the default answered correctly, so it was not shipped. "Answered without the gold chunk" counts strict span matches only, and the judge found every such answer supported by the retrieved text.
 - **The judge is noisy at the edges.** Before the fixes it marked one correct, in-context answer unsupported; after, it split one fact into two claims and graded them differently. Treat single-example scores with care and compare aggregate runs.
 
-Raw output lives in [`evaluation/results/`](evaluation/results/): `bm25_baseline.json` (offline run), `baseline.json` (before #2), `baseline_postfix.json` (after #2 and #4) `hybrid_app.json` (dense vs hybrid app, same questions), `score_fusion.json` (score fusion on both datasets) and `abstain_prompt.json` (answer prompt comparison). A full run costs well under $1 (about 0.5M embedding tokens plus 200 `gpt-4o-mini` calls).
+Raw output lives in [`evaluation/results/`](evaluation/results/): `bm25_baseline.json` (offline run), `baseline.json` (before #2), `baseline_postfix.json` (after #2 and #4) `hybrid_app.json` (dense vs hybrid app, same questions), `score_fusion.json` (score fusion on both datasets), `abstain_prompt.json` (answer prompt comparison) and `abstain_nq.json` (wrong declines on NQ). A full run costs well under $1 (about 0.5M embedding tokens plus 200 `gpt-4o-mini` calls).
 
 ### Second dataset: Natural Questions
 
@@ -170,6 +170,33 @@ The two datasets disagree about BM25: it is the strongest single retriever on SQ
 | 0.5 | 0.933 | 0.857 |
 
 0.7 has the smallest worst-case loss: within 1.6 points of the best weight on SQuAD and 2.1 on NQ. Against the former RRF default it gains 2.6 points on SQuAD and 5.8 on NQ, and through the app (same 100 questions per dataset) context has the answer rises from 0.87 to 0.94 on SQuAD and from 0.85 to 0.90 on NQ, with faithfulness 1.000 on both. The extra Chroma lookup and scaling cost about 1.5-3 ms per query over RRF (7.2 vs 5.8 ms on SQuAD, 15.0 vs 12.1 ms on NQ). The weight was chosen on these two datasets, so treat the margins as optimistic; `HYBRID_DENSE_WEIGHT` and `HYBRID_FUSION=rrf` let you change it. The 0.7 row is the shipped code's own run ([`evaluation/results/score_fusion.json`](evaluation/results/score_fusion.json)); the other weights come from a one-off sweep with the same exact scoring.
+
+### When the app says it doesn't know
+
+On NQ the app replied with the fixed "I don't know based on the provided documents." to 7 of 100 questions whose gold chunk it had retrieved (SQuAD: 3). Capturing the exact prompts showed a clean pipeline: one LLM call per question, no refine step, nothing truncated. The cause is the chunks. Each gold chunk answers its question only indirectly, next to two related chunks that don't:
+
+- "where was part of the classic surfing movie endless summer filmed": the gold chunk lists the coasts the surfers travel to but never names the film.
+- "who played the princess in kingsman secret service": "Hanna Alström ... appear as Crown Princess Tilde of Sweden", with no mention of Kingsman.
+- "who wrote the theme song to law and order": Mike Post is "best known for his TV theme songs for such series as Law & Order", next to a chunk about another Law & Order fact and one about another theme song.
+
+Six answer setups were run on those 7 questions, the 16 questions whose gold chunk was not retrieved (10 NQ, 6 SQuAD), and the remaining SQuAD decline, all with the same retrieved chunks (`gpt-4o-mini`, temperature 0):
+
+| Answer setup | Answered of the 7 (correct) | Fixed declines on the 16 without the gold chunk | Unsupported claims on those 16 |
+|---|---|---|---|
+| **Shipped** (grounded prompt naming indirect answers) | 0 (0) | 9 | 0 |
+| Other wordings with the fixed decline: a shorter prompt, the same split into system and user messages, and LlamaIndex's default plus one decline sentence | 0 (0) | 8 to 10 | 0 |
+| Evidence first: quote the supporting sentence, decline when there is none | 0 (0) | 10 | 1 |
+| LlamaIndex default, no fixed decline | 7 (5) | 0 (7 declines in free text the app cannot detect) | 0 |
+| LlamaIndex default plus a second call that classifies the reply as an answer or a decline | 7 (5) | 7 | 0 |
+
+**Kept: the grounded prompt.** Whenever the prompt allows a decline, `gpt-4o-mini` takes it on these near-miss chunks, whatever the wording or format. The only setup that answers them is one without a decline in the prompt, plus a second LLM call to detect declines. That would roughly gain 5 correct NQ answers per 100, but it turned 2 correct declines into wrong answers the context supports (Ronaldo's La Liga goals "286" for 309) and misread a hedged correct answer as a decline, and it doubles the LLM calls per query. For a document Q&A app, a decline on a chunk that never names the film is the safer error. The shipped wording ([`utils/prompts.py`](utils/prompts.py)) names indirect answers (tables, lists, picking the latest, "as of" dates) and leaves NQ unchanged; on SQuAD it cut wrong declines from 3 to 1, within noise for n = 100. Through the app, same 100 questions per dataset:
+
+| Dataset | Faithfulness | Answer recall | Wrong declines | Answered without the gold chunk |
+|---|---|---|---|---|
+| SQuAD | 1.000 | 0.85 (was 0.84) | 1 (was 3) | 3 (was 4) |
+| NQ | 1.000 | 0.61 (was 0.60) | 7 (was 7) | 4 (was 4) |
+
+Summaries: [`evaluation/results/abstain_nq.json`](evaluation/results/abstain_nq.json). The variant sweep ran from a one-off script that is not part of the harness.
 
 ### Running it
 
