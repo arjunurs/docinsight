@@ -12,8 +12,8 @@ NO_ANSWER = "I don't know based on the provided documents."
 # questions whose answer chunk was retrieved. NQ questions are search queries, and
 # many answers there have to be read off the context rather than quoted: a row of a
 # flattened table, the latest item in a list, a count, or a fact stated as of the
-# document's date. The rules name those cases so the model treats them as answers,
-# and keep the decline for context that is about something else.
+# document's date. The rules name those cases so the model treats them as answers;
+# the decline still applies whenever the context does not hold the answer.
 _ANSWER_RULES = (
     "Answer the query using only the context above, not prior knowledge.\n"
     "Queries are often short search phrases (\"actor who plays X\", \"last time Y won\"); "
@@ -33,8 +33,7 @@ TEXT_QA_PROMPT = PromptTemplate(
     "{context_str}\n"
     "---------------------\n"
     + _ANSWER_RULES
-    + "Only if the context is about something else and nothing in it answers the query, "
-    f'reply exactly: "{NO_ANSWER}"\n'
+    + f'If nothing in the context answers the query, reply exactly: "{NO_ANSWER}"\n'
     "Query: {query_str}\n"
     "Answer: "
 )
