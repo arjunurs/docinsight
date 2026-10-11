@@ -67,7 +67,7 @@ def _claude(model: str, reasoning_effort: str) -> LLM:
     try:
         from llama_index.llms.anthropic import Anthropic
     except ImportError as err:  # pragma: no cover - depends on the environment
-        raise ImportError("Claude models need llama-index-llms-anthropic (see requirements.txt)") from err
+        raise ImportError("Claude models need llama-index-llms-anthropic (see pyproject.toml)") from err
 
     class Claude(Anthropic):
         @property
