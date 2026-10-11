@@ -4,6 +4,8 @@ Hybrid retrieval tests: fused ranking, BM25 built from the persisted collection,
 Embeddings are mocked (every chunk gets the same vector), so dense search alone
 cannot tell chunks apart and any correct ranking has to come from BM25.
 """
+import math
+
 import pytest
 from llama_index.core import QueryBundle
 from llama_index.core.embeddings import MockEmbedding
@@ -67,7 +69,8 @@ def fake_dense(monkeypatch, retriever, order):
 
     class FakeDense:
         def retrieve(self, query_bundle):
-            return [NodeWithScore(node=stored[name], score=1.0) for name in order]
+            # Scores fall with rank, in Chroma's exp(-distance) form
+            return [NodeWithScore(node=stored[name], score=math.exp(-0.1 * i)) for i, name in enumerate(order)]
 
     monkeypatch.setattr(retriever.index, "as_retriever", lambda similarity_top_k: FakeDense())
 
@@ -257,3 +260,112 @@ def test_refine_prompt_keeps_the_grounding_rule_after_a_no_answer(tmp_path):
             assert f'reply exactly: "{NO_ANSWER}"' in prompt, mode
         # The chunk that answers the query reaches the LLM in one of the calls
         assert any("raises ocean tides" in p for p in llm.prompts), mode
+
+
+def test_score_fusion_lets_a_strong_keyword_match_win_and_ignores_weak_ones():
+    from utils.retrieval import score_fusion
+
+    dense = {"a": 0.90, "b": 0.88, "c": 0.50}
+    # A confident keyword match on "b" lifts it over "a"...
+    assert score_fusion(dense, {"a": 0.0, "b": 9.0, "c": 0.0}, k=3, dense_weight=0.7)[0] == "b"
+    # ...but small keyword differences leave the dense order alone
+    assert score_fusion(dense, {"a": 0.0, "b": 0.1, "c": 1.0}, k=3, dense_weight=0.7) == ["a", "b", "c"]
+
+
+def test_score_fusion_weights_and_missing_scores():
+    from utils.retrieval import fused_scores, score_fusion
+
+    dense, keyword = {"a": 1.0, "b": 0.0}, {"a": 0.0, "b": 1.0}
+    assert score_fusion(dense, keyword, k=2, dense_weight=1.0) == ["a", "b"]
+    assert score_fusion(dense, keyword, k=2, dense_weight=0.0) == ["b", "a"]
+    # A keyword-only candidate takes dense's lowest score, since it fell below dense's cutoff
+    fused = fused_scores({"a": 1.0, "b": 0.5}, {"a": 0.0, "b": 0.0, "c": 2.0}, dense_weight=0.7)
+    assert fused["c"] == pytest.approx(0.3)
+    assert fused_scores({}, {}) == {}
+
+
+def test_chroma_scores_are_converted_back_to_a_linear_scale():
+    from utils.retrieval import chroma_score_to_dense
+
+    # LlamaIndex reports exp(-distance); the conversion gives minus the distance back
+    assert chroma_score_to_dense(math.exp(-0.4)) == pytest.approx(-0.4)
+    assert chroma_score_to_dense(0.0) == -math.inf
+
+
+def test_hybrid_rejects_bad_fusion_settings(tmp_path):
+    index = make_manager(tmp_path).get_index()
+    with pytest.raises(ValueError):
+        HybridRetriever(index, fusion="max")
+    with pytest.raises(ValueError):
+        HybridRetriever(index, dense_weight=1.5)
+
+
+def test_rrf_fusion_is_still_available(tmp_path, monkeypatch):
+    manager = make_manager(tmp_path)
+    ingest(manager, write_files(tmp_path / "upload", TOPICS))
+    retriever = HybridRetriever(manager.get_index(), similarity_top_k=3, fusion="rrf")
+    fake_dense(monkeypatch, retriever, ["tides.txt", "comets.txt", "bees.txt", "glaciers.txt", "volcanoes.txt"])
+
+    results = retriever.retrieve("Which way does the tail of a comet point from the Sun?")
+
+    # comets is 2nd by dense and 1st by BM25, so it beats tides (1st by dense only)
+    assert file_names(results)[0] == "comets.txt"
+    assert results[0].score == pytest.approx(1 / 62 + 1 / 61)
+
+
+def test_config_reads_fusion_settings(monkeypatch):
+    assert (AppConfig().hybrid_fusion, AppConfig().hybrid_dense_weight) == ("score", 0.7)
+    monkeypatch.setenv("HYBRID_FUSION", "rrf")
+    monkeypatch.setenv("HYBRID_DENSE_WEIGHT", "0.5")
+    config = AppConfig.from_env()
+    assert (config.hybrid_fusion, config.hybrid_dense_weight) == ("rrf", 0.5)
+
+
+def test_stored_dense_scores_match_chroma_distances():
+    import chromadb
+    import chromadb.config
+
+    from utils.retrieval import stored_dense_scores
+
+    collection = chromadb.EphemeralClient(
+        settings=chromadb.config.Settings(anonymized_telemetry=False)
+    ).create_collection("stored-scores")
+    collection.add(ids=["a", "b", "c"], embeddings=[[1.0, 0.0], [0.0, 1.0], [0.6, 0.8]])
+    query = [1.0, 0.0]
+
+    scores = stored_dense_scores(collection, query, ["c", "a"])
+    hits = collection.query(query_embeddings=[query], n_results=3)
+
+    # Same scale as search hits: minus Chroma's own squared L2 distance
+    by_id = dict(zip(hits["ids"][0], hits["distances"][0]))
+    assert scores == {"a": pytest.approx(-by_id["a"]), "c": pytest.approx(-by_id["c"])}
+    assert stored_dense_scores(collection, query, []) == {}
+
+
+def test_bm25_only_candidates_get_exact_dense_scores_from_the_query_embedding(tmp_path, monkeypatch):
+    import utils.retrieval as retrieval
+
+    manager = make_manager(tmp_path)
+    ingest(manager, write_files(tmp_path / "upload", TOPICS))
+    retriever = HybridRetriever(manager.get_index(), similarity_top_k=3)
+    stored = {n.metadata["file_name"]: n for n in retriever._bm25_index().nodes}
+
+    class OneHitDense:
+        def retrieve(self, query_bundle):
+            query_bundle.embedding = [0.1] * 8  # dense search embeds the query into the bundle
+            return [NodeWithScore(node=stored["tides.txt"], score=math.exp(-0.5))]
+
+    monkeypatch.setattr(retriever.index, "as_retriever", lambda similarity_top_k: OneHitDense())
+    calls = []
+    real = retrieval.stored_dense_scores
+    monkeypatch.setattr(
+        retrieval, "stored_dense_scores", lambda c, emb, ids: calls.append((emb, list(ids))) or real(c, emb, ids)
+    )
+
+    retriever.retrieve("glaciers carve valleys")
+
+    # Scored once, from the bundle's embedding (no second embedding call), for BM25-only chunks
+    assert len(calls) == 1
+    embedding, ids = calls[0]
+    assert embedding == [0.1] * 8
+    assert stored["glaciers.txt"].node_id in ids and stored["tides.txt"].node_id not in ids

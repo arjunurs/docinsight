@@ -58,6 +58,8 @@ if "query_engine" not in st.session_state:
         st.session_state.index_manager.get_index(),
         retrieval_mode=config.retrieval_mode,
         reranker=reranker,
+        fusion=config.hybrid_fusion,
+        dense_weight=config.hybrid_dense_weight,
         rerank_candidates=config.rerank_candidates
     )
 if "documents_processed" not in st.session_state:
