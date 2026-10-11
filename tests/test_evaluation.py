@@ -9,7 +9,7 @@ from llama_index.core.base.embeddings.base import BaseEmbedding
 from evaluation.chunking import chunk_documents, label_relevant_chunks
 from evaluation.dataset import build_dataset
 from evaluation.faithfulness import judge_faithfulness, parse_judge_output
-from evaluation.metrics import answer_recall, reciprocal_rank, recall_at_k, token_f1
+from evaluation.metrics import answer_recall, percentile, reciprocal_rank, recall_at_k, token_f1
 from evaluation.retrievers import (
     BM25Retriever,
     DenseRetriever,
@@ -128,6 +128,10 @@ def test_answer_metrics():
     assert answer_recall("The largest planet is Jupiter.", ["Jupiter"]) == 1.0
     assert answer_recall("Jupiterian moons", ["Jupiter"]) == 0.0
     assert answer_recall("anything", ["the"]) == 0.0
+    # Typographic quotes, dashes and superscripts match their ASCII forms
+    assert answer_recall("It was Brocard’s idea", ["Brocard's"]) == 1.0
+    assert answer_recall("“socialism in one country”", ['"socialism in one country"']) == 1.0
+    assert token_f1("10 m³", ["10 m3"]) == 1.0
 
 
 def test_rrf_prefers_documents_ranked_well_by_both():
@@ -234,14 +238,30 @@ def test_faithfulness_summary_is_strict_json_when_nothing_is_scored(dataset):
     chunks = chunk_documents(dataset.documents, chunk_size=96, chunk_overlap=0)
     relevant = label_relevant_chunks(dataset.queries, chunks)
     dense = DenseRetriever(chunks, embed_model=HashingEmbedding())
-    args = NS(llm_model="m", temperature=0.0, judge_model="j", faithfulness=2, seed=13, retrieval_mode="hybrid", prompt="grounded", reranker="", rerank_candidates=10, fusion="score", dense_weight=0.7)
+    args = NS(llm_model="m", temperature=0.0, reasoning_effort="none", judge_model="j", faithfulness=2, seed=13, retrieval_mode="hybrid", prompt="grounded", reranker="", rerank_candidates=10, fusion="score", dense_weight=0.7)
     answer_llm = MockLLM()
     no_claims = NS(complete=lambda prompt: NS(text='{"claims": []}'))
 
     result = evaluate_faithfulness(dense, dataset.queries, relevant, args, answer_llm, no_claims)
     summary = result["summary"]
     assert summary["faithfulness"] is None and summary["fully_faithful_rate"] is None
+    # The mock reports no token usage, so there is nothing to price
+    assert summary["cost_per_1k_queries_usd"] is None and summary["ms_per_query"] >= 0
     json.dumps(summary, allow_nan=False)
+
+
+def test_cli_compares_answer_models_with_per_model_effort():
+    from evaluation.run import format_model_table, parse_args
+
+    args = parse_args(["--llm-model", "gpt-6-luna, claude-opus-5-5:low", "--reasoning-effort", "none"])
+    assert args.answer_models == [("gpt-6-luna", "none"), ("claude-opus-5-5", "low")]
+
+    table = format_model_table({"gpt-6-luna:none": {
+        "answer_recall": 0.6, "no_answer_with_answer_in_context": 7, "answered_without_answer_in_context": 4,
+        "faithfulness": 1.0, "ms_per_query_p50": 812.4, "ms_per_query_p95": 1500.0,
+        "output_tokens_per_query": 21.0, "cost_per_1k_queries_usd": None,
+    }})
+    assert "| gpt-6-luna:none | 0.60 | 7 | 4 | 1.000 | 812 | 1500 | 21 | n/a |" in table
 
 
 def _mrqa_example(context, qid, question, answer, start):
@@ -315,3 +335,12 @@ def test_nq_max_documents_drops_questions_with_gold_outside_the_corpus(tmp_path)
     assert len(load_nq(path).queries) == 2
     # The merged question also has gold in the third passage, so only a1 survives.
     assert [q.query_id for q in load_nq(path, max_documents=2).queries] == ["a1"]
+
+
+def test_percentile_uses_nearest_rank():
+    values = list(range(1, 101))
+    assert percentile(values, 50) == 50
+    assert percentile(values, 95) == 95
+    assert percentile(list(range(1, 21)), 95) == 19
+    assert percentile([7], 95) == 7
+    assert math.isnan(percentile([], 95))

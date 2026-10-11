@@ -15,7 +15,8 @@ A simple Retrieval Augmented Generation (RAG) application that allows users to u
 - **LlamaIndex**: Main framework for document indexing and retrieval
 - **ChromaDB**: Vector database for storing and searching document embeddings
 - **Streamlit**: Frontend framework for the user interface
-- **OpenAI API**: For generating embeddings and LLM responses
+- **OpenAI API**: Embeddings (and answers, with an OpenAI `LLM_MODEL`)
+- **Claude API**: Answers, Claude Haiku 5.5 by default
 
 ## Implementation Details
 
@@ -32,7 +33,7 @@ Documents are processed through the following workflow:
 
 When a user asks a question:
 1. Hybrid search finds the 3 most relevant chunks: BM25 keyword search and dense vector search each score the stored chunks, and the two scores are fused, 70% dense and 30% BM25 after scaling each to 0-1 per question (see [Fusing BM25 and dense](#fusing-bm25-and-dense); set `RETRIEVAL_MODE=dense` for vector search only)
-2. Retrieved chunks are used as context for the OpenAI LLM (gpt-4o-mini)
+2. Retrieved chunks are used as context for the answer model, Claude Haiku 5.5 (`claude-haiku-5-5`, thinking off) by default; any OpenAI or Claude chat model can be set instead (see [Choosing the answer model](#choosing-the-answer-model))
 3. The model answers only from that context; when the chunks hold nothing relevant it replies "I don't know based on the provided documents." instead of guessing
 4. Both the answer and source references are displayed to the user
 
@@ -77,7 +78,7 @@ Retrieval moved by at most 0.002 across the fixes, so one table, from the latest
 | hybrid, RRF (former default) | 0.700 | 0.890 | 0.939 | 0.975 | 0.802 |
 | hybrid, score fusion (app default) | 0.752 | **0.917** | **0.953** | **0.978** | 0.839 |
 
-Answer quality, 100 sampled questions through the app's `QueryEngine` (top 3, `gpt-4o-mini`, judged by `gpt-4o-mini`):
+Answer quality, 100 sampled questions through the app's `QueryEngine` (top 3, `gpt-4o-mini`, judged by `gpt-4o-mini`; these runs predate the switch to Claude Haiku 5.5):
 
 | Run | Retriever | Faithfulness | Fully faithful | No-claim answers | Answer recall | Context has answer |
 |---|---|---|---|---|---|---|
@@ -135,7 +136,7 @@ BM25 loses 18 points of recall@3 on real queries. Part of that is the larger cor
 
 **On questions phrased the way users phrase them, dense retrieval beat the former RRF hybrid by 7.7 points of recall@3**, because equal-weight rank fusion lets the weak BM25 ranking pull good dense hits down. On SQuAD it is the reverse (hybrid 0.891, dense 0.774). Score fusion, the app's default now, closes most of that gap: 1.8 points behind dense on NQ, and the best recall@3 of any retriever on SQuAD. See [Fusing BM25 and dense](#fusing-bm25-and-dense).
 
-To reproduce (needs `OPENAI_API_KEY`; about 0.9M embedding tokens, a few cents, plus 200 `gpt-4o-mini` calls for the answer run):
+To reproduce (needs `OPENAI_API_KEY`; about 0.9M embedding tokens, a few cents, plus 200 answer-model and 200 `gpt-4o-mini` judge calls for the answer run):
 
 ```
 python -m evaluation.run --dataset nq --retrievers bm25,dense,hybrid --faithfulness 100 \
@@ -171,6 +172,55 @@ The two datasets disagree about BM25: it is the strongest single retriever on SQ
 
 0.7 has the smallest worst-case loss: within 1.6 points of the best weight on SQuAD and 2.1 on NQ. Against the former RRF default it gains 2.6 points on SQuAD and 5.8 on NQ, and through the app (same 100 questions per dataset) context has the answer rises from 0.87 to 0.94 on SQuAD and from 0.85 to 0.90 on NQ, with faithfulness 1.000 on both. The extra Chroma lookup and scaling cost about 1.5-3 ms per query over RRF (7.2 vs 5.8 ms on SQuAD, 15.0 vs 12.1 ms on NQ). The weight was chosen on these two datasets, so treat the margins as optimistic; `HYBRID_DENSE_WEIGHT` and `HYBRID_FUSION=rrf` let you change it. The 0.7 row is the shipped code's own run ([`evaluation/results/score_fusion.json`](evaluation/results/score_fusion.json)); the other weights come from a one-off sweep with the same exact scoring.
 
+### Choosing the answer model
+
+Retrieval and embeddings stay fixed (hybrid score fusion, OpenAI `text-embedding-3-small`), so this compares only the model that writes the answer. Six models answered the same 100 seeded questions per dataset from the same retrieved chunks, with the shipped grounded prompt and `gpt-4o-mini` as judge. Cost uses list prices per 1M tokens checked in October 2026 (`utils/llm.py`); latency is wall-clock per query from a laptop, including retrieval.
+
+SQuAD:
+
+| Answer model (effort) | Answer recall | Wrong "don't know" | Faithfulness | p50 ms | p95 ms | Output tokens | $ per 1k queries |
+|---|---|---|---|---|---|---|---|
+| gpt-4o-mini | 0.86 | 3 | 1.000 | 872 | 1291 | 25 | 0.24 |
+| gpt-6-luna (none) | 0.85 | 0 | 0.990 | 1240 | 1985 | 19 | 0.16 |
+| gpt-6.1-sol (low) | 0.85 | 0 | 1.000 | 1825 | 2956 | 25 | 3.23 |
+| **claude-haiku-5-5 (none, default)** | **0.89** | **0** | **1.000** | 1210 | 1686 | 73 | 0.27 |
+| claude-sonnet-5-5 (none) | 0.92 | 0 | 1.000 | 1543 | 2470 | 101 | 5.74 |
+| claude-opus-5-5 (low) | 0.91 | 0 | 1.000 | 2676 | 4696 | 175 | 12.97 |
+
+Natural Questions:
+
+| Answer model (effort) | Answer recall | Wrong "don't know" | Faithfulness | p50 ms | p95 ms | Output tokens | $ per 1k queries |
+|---|---|---|---|---|---|---|---|
+| gpt-4o-mini | 0.59 | 7 | 1.000 | 882 | 1394 | 31 | 0.11 |
+| gpt-6-luna (none) | 0.55 | 5 | 1.000 | 1270 | 1964 | 25 | 0.07 |
+| gpt-6.1-sol (low) | 0.61 | 1 | 0.986 | 1944 | 3152 | 34 | 1.58 |
+| **claude-haiku-5-5 (none, default)** | **0.67** | **0** | **1.000** | 1311 | 1926 | 95 | 0.15 |
+| claude-sonnet-5-5 (none) | 0.69 | 3 | 1.000 | 1634 | 2893 | 122 | 3.21 |
+| claude-opus-5-5 (low) | 0.66 | 1 | 1.000 | 2547 | 5776 | 175 | 7.48 |
+
+"Wrong don't know" counts fixed-sentence declines where the gold chunk was retrieved. Effort `none` means no thinking; Opus 5.5 and GPT-6.1 Sol always think, so they ran at `low`.
+
+Why Claude Haiku 5.5 is the default:
+
+- **Best quality in the cheap tier.** It beats `gpt-4o-mini` and GPT-6 Luna on answer recall by 3 to 12 points and is the only model with no wrong declines on either dataset, at about the cost of `gpt-4o-mini` and the latency of Luna.
+- **The expensive models don't pay for themselves here.** Sonnet, Opus and Sol cost 10 to 80 times more for at most 3 more points of recall, which is within noise. Their edge is on the hardest questions: Sol and Opus answered all 7 NQ questions `gpt-4o-mini` had declined despite having the answer in context (Haiku answered 6, 3 of them with a hedge).
+- **Faithfulness doesn't separate them.** Every model stays at or near 1.0 with the grounded prompt.
+
+What to keep in mind:
+
+- **Answer recall rewards long answers.** It checks only whether the gold span appears in the answer. Claude's answers are 3 to 7 times longer, and it more often hedges ("the context doesn't state X, but ..."), which counts as an answer when the gold text is in it. Token F1, which penalizes extra words, ranks them the other way (SQuAD / NQ: Luna 0.50 / 0.34, `gpt-4o-mini` 0.28 / 0.26, Haiku 0.20 / 0.20). Part of Haiku's lead is real (clean answers on questions the OpenAI models declined) and part is verbosity.
+- **n = 100 is noisy.** Luna's NQ answer recall was 0.60 in an earlier run of the same code and 0.55 here, because reasoning models run at temperature 1. Treat gaps under about 5 points as ties.
+- **Two API keys.** The default needs `ANTHROPIC_API_KEY` for answers alongside `OPENAI_API_KEY` for embeddings. `LLM_MODEL=gpt-6-luna` is the cheapest OpenAI-only setup, with the tightest answers but the weakest NQ recall.
+
+To reproduce (needs both keys; about $4 in answer calls for all six models on both datasets, most of it Opus and Sonnet, plus embeddings and judge calls):
+
+```
+uv run python -m evaluation.run --dataset squad --retrievers hybrid --faithfulness 100 \
+    --llm-model gpt-4o-mini,gpt-6-luna:none,gpt-6.1-sol:low,claude-haiku-5-5:none,claude-sonnet-5-5:none,claude-opus-5-5:low
+```
+
+Run it again with `--dataset nq`.
+
 ### Running it
 
 ```
@@ -182,14 +232,20 @@ uv run python -m evaluation.run --dataset nq --retrievers bm25  # same on Natura
 # Needs OPENAI_API_KEY (read from .env)
 uv run python -m evaluation.run --retrievers bm25,dense,hybrid --faithfulness 100 \
     --output evaluation/results/baseline.json
+
+# Compare answer models on the same questions and retrieved chunks (Claude needs ANTHROPIC_API_KEY);
+# MODEL:EFFORT overrides --reasoning-effort for one model. Prints answer recall, wrong "don't know",
+# faithfulness, latency and cost per 1k queries for each.
+python -m evaluation.run --dataset nq --retrievers hybrid --faithfulness 100 \
+    --llm-model gpt-4o-mini,gpt-6-luna,claude-haiku-5-5
 ```
 
-`--max-articles` (alias `--max-documents`) and `--max-questions` shrink the run for quick iteration; `--chunk-size`, `--chunk-overlap`, `--embedding-model`, `--temperature`, `--judge-model`, `--retrieval-mode` (the retriever the faithfulness run's `QueryEngine` uses, `hybrid` by default), `--prompt` (`grounded`, the app's, or LlamaIndex's `default`), and `--reranker`, `--rerank-candidates` and `--rerank-base` for the optional reranker make it easy to compare variants against the baseline.
+`--max-articles` (alias `--max-documents`) and `--max-questions` shrink the run for quick iteration; `--chunk-size`, `--chunk-overlap`, `--embedding-model`, `--llm-model`, `--reasoning-effort`, `--temperature`, `--judge-model`, `--retrieval-mode` (the retriever the faithfulness run's `QueryEngine` uses, `hybrid` by default), `--prompt` (`grounded`, the app's, or LlamaIndex's `default`), and `--reranker`, `--rerank-candidates` and `--rerank-base` for the optional reranker make it easy to compare variants against the baseline.
 
 ### Caveats
 
 - SQuAD questions were written by annotators looking at the paragraph, so they share many words with it. That favors BM25, and absolute recall here will be higher than on real user questions. Use the numbers to compare variants, not as a production estimate.
-- The judge defaults to the same model that writes the answers, which can inflate faithfulness. Pass a different `--judge-model` for a stricter check.
+- The judge is `gpt-4o-mini` whatever the answer model, so faithfulness compares across answer models. It is a small judge; pass a stronger `--judge-model` for a stricter check, and re-baseline when you do.
 - The harness chunks once and builds a fresh index per run, so it never measured the double chunking or re-upload duplicates fixed in #2; that is why retrieval numbers did not move.
 
 ## Getting Started
@@ -198,7 +254,8 @@ uv run python -m evaluation.run --retrievers bm25,dense,hybrid --faithfulness 10
 
 - [uv](https://docs.astral.sh/uv/getting-started/installation/), which installs Python 3.12 if needed (the Docker image and CI use 3.12)
 - Docker and Docker Compose (for containerized deployment)
-- OpenAI API key
+- OpenAI API key (embeddings)
+- Anthropic API key (default answer model; not needed with `LLM_MODEL=gpt-6-luna`)
 
 ### Installation
 
@@ -210,10 +267,10 @@ uv run python -m evaluation.run --retrievers bm25,dense,hybrid --faithfulness 10
    cd docinsight
    ```
 
-2. Create a `.env` file with your OpenAI API key:
+2. Create a `.env` file with your API keys:
    ```
    cp .env.example .env
-   # Edit .env with your actual API key
+   # Edit .env with your actual API keys
    ```
 
 3. Build and run the Docker container:
@@ -236,10 +293,10 @@ uv run python -m evaluation.run --retrievers bm25,dense,hybrid --faithfulness 10
    uv sync
    ```
 
-3. Create a `.env` file with your OpenAI API key:
+3. Create a `.env` file with your API keys (OpenAI for embeddings, Anthropic for the default answer model; set `LLM_MODEL=gpt-6-luna` to run on the OpenAI key alone):
    ```
    cp .env.example .env
-   # Edit .env with your actual API key
+   # Edit .env with your actual API keys
    ```
 
 4. Run the application:
@@ -267,8 +324,9 @@ All settings are optional environment variables, read at startup (see `.env.exam
 | `CHUNK_SIZE` | 512 | Tokens per chunk |
 | `CHUNK_OVERLAP` | 50 | Overlapping tokens between chunks |
 | `EMBEDDING_MODEL` | text-embedding-3-small | OpenAI embedding model |
-| `LLM_MODEL` | gpt-4o-mini | OpenAI model used to answer |
-| `LLM_TEMPERATURE` | 0.0 | Kept at 0 so answers stay grounded and repeatable |
+| `LLM_MODEL` | claude-haiku-5-5 | Model used to answer: a Claude model (needs `ANTHROPIC_API_KEY`) or an OpenAI model such as `gpt-6-luna` (OpenAI key only). See [Choosing the answer model](#choosing-the-answer-model). `gpt-4o-mini` until October 2026; set it back to reproduce older answer runs |
+| `LLM_REASONING_EFFORT` | none | Reasoning effort for current OpenAI and Claude models: `none` answers directly (Claude Haiku 5.5 and Sonnet 5.5 turn thinking off, at effort `low`), `low`/`medium`/`high` think first at more cost and latency. Models that always think (GPT-6.1 Sol, Claude Opus 5.5) need `low` or higher |
+| `LLM_TEMPERATURE` | 0.0 | Older models only, kept at 0 so answers stay grounded and repeatable. LlamaIndex runs reasoning models at 1.0 |
 | `RETRIEVAL_MODE` | hybrid | `hybrid` (BM25 + dense, fused) or `dense` (vector search only) |
 | `HYBRID_FUSION` | score | How hybrid fuses BM25 and dense: `score` (weighted sum of per-query scaled scores) or `rrf` (reciprocal rank fusion, the former default) |
 | `HYBRID_DENSE_WEIGHT` | 0.7 | Weight on dense in score fusion, 0 to 1; BM25 gets the rest |
@@ -319,7 +377,7 @@ The tests use a mock embedding model and make no OpenAI calls. GitHub Actions ru
 
 If you encounter any issues:
 
-1. Make sure your OpenAI API key is correctly set in the .env file
+1. Make sure your OpenAI API key (and Anthropic API key for a `claude-*` answer model) is correctly set in the .env file
 2. For Docker deployment, ensure ports 8501 is not already in use
 3. If you see errors related to document processing, check that your PDF files are text-based and not scanned images
 4. Restart the application with `docker-compose down && docker-compose up -d` if needed

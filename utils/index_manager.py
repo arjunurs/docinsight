@@ -7,9 +7,10 @@ from typing import List, Optional, Sequence
 import chromadb
 from llama_index.core import VectorStoreIndex, StorageContext, Settings
 from llama_index.embeddings.openai import OpenAIEmbedding
-from llama_index.llms.openai import OpenAI
 from llama_index.vector_stores.chroma import ChromaVectorStore
 from llama_index.core.schema import BaseNode
+
+from utils.llm import build_llm
 
 
 class IndexManager:
@@ -22,8 +23,9 @@ class IndexManager:
         persist_dir: str = "./data/chroma",
         collection_name: str = "document_collection",
         embedding_model: str = "text-embedding-3-small",
-        llm_model: str = "gpt-4o-mini",
-        temperature: float = 0.0
+        llm_model: str = "claude-haiku-5-5",
+        temperature: float = 0.0,
+        reasoning_effort: str = "none"
     ):
         """
         Initialize the index manager with the specified parameters.
@@ -32,14 +34,17 @@ class IndexManager:
             persist_dir: Directory where ChromaDB data will be stored
             collection_name: Name of the ChromaDB collection
             embedding_model: Name of the OpenAI embedding model to use
-            llm_model: Name of the OpenAI LLM model to use
-            temperature: Temperature parameter for the LLM (0 keeps answers grounded and repeatable)
+            llm_model: Answer model; "claude-..." names use Anthropic, anything else OpenAI
+            temperature: Temperature parameter for the LLM (0 keeps answers grounded and repeatable).
+                LlamaIndex pins reasoning models (GPT-5 and later) to 1.0, so it only applies to older models.
+            reasoning_effort: Reasoning effort for reasoning models (none, low, medium, ...); ignored by older models
         """
         self.persist_dir = persist_dir
         self.collection_name = collection_name
         self.embedding_model = embedding_model
         self.llm_model = llm_model
         self.temperature = temperature
+        self.reasoning_effort = reasoning_effort
         
         # Create storage directory if it doesn't exist
         os.makedirs(self.persist_dir, exist_ok=True)
@@ -54,7 +59,7 @@ class IndexManager:
         
         # Initialize embedding and LLM models
         self.embed_model = OpenAIEmbedding(model=self.embedding_model)
-        self.llm = OpenAI(model=self.llm_model, temperature=self.temperature)
+        self.llm = build_llm(self.llm_model, self.temperature, self.reasoning_effort)
         
         # Chunking is done by DocumentProcessor; the index only embeds and stores nodes
         Settings.embed_model = self.embed_model
