@@ -47,7 +47,7 @@ if "index_manager" not in st.session_state:
     )
 if "query_engine" not in st.session_state:
     try:
-        # Off unless RERANKER is set; needs requirements-rerank.txt
+        # Off unless RERANKER is set; needs uv sync --extra rerank
         reranker = build_reranker(config.reranker)
     except (ImportError, ValueError) as err:
         st.error(f"RERANKER={config.reranker!r}: {err}")

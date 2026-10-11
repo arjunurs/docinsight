@@ -72,7 +72,7 @@ def test_unknown_reranker_is_rejected():
 
 def test_missing_extra_fails_at_startup(monkeypatch):
     monkeypatch.setattr(reranking.importlib.util, "find_spec", lambda name: None)
-    with pytest.raises(ImportError, match="requirements-rerank.txt"):
+    with pytest.raises(ImportError, match="--extra rerank"):
         build_reranker("minilm")
 
 

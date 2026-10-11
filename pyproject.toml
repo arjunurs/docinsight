@@ -1,0 +1,48 @@
+[project]
+name = "docinsight"
+version = "0.1.0"
+description = "Document Q&A over PDFs and text files with hybrid retrieval and a retrieval evaluation harness"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "llama-index-core>=0.14.25",
+    "llama-index-llms-openai>=0.8.2",
+    "llama-index-embeddings-openai>=0.7.0",
+    # Without it SimpleDirectoryReader loads a PDF's raw bytes as text
+    "llama-index-readers-file>=0.7.0",
+    "llama-index-vector-stores-chroma>=0.6.0",
+    "openai>=2.54.0",
+    "streamlit>=1.65.0",
+    "chromadb>=1.5.9",
+    "pypdf>=6.20.0",
+    "rank-bm25>=0.2.2",
+    "tiktoken>=0.14.0",
+    "python-dotenv>=1.2.4",
+    "pydantic>=2.14.0",
+]
+
+[project.optional-dependencies]
+# Cross-encoder reranker (RERANKER=minilm). torch is listed so it can come from
+# the CPU-only index on Linux: PyPI's Linux wheel pulls in ~2 GB of CUDA libraries.
+rerank = [
+    "sentence-transformers>=6.1.0",
+    "torch>=2.14.1",
+]
+
+[dependency-groups]
+dev = ["pytest>=9.1.1"]
+
+[tool.uv]
+# An application, not a library: install its dependencies, not the project itself
+package = false
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
