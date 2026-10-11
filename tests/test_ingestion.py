@@ -3,6 +3,8 @@ Ingestion tests: single chunking pass, env config, idempotent re-uploads, reload
 
 Embeddings are mocked, so no OpenAI calls are made.
 """
+from pathlib import Path
+
 import pytest
 from llama_index.core.embeddings import MockEmbedding
 from llama_index.core.schema import MetadataMode
@@ -132,3 +134,15 @@ def test_chunks_embed_file_name_not_temp_path(tmp_path, sample_file):
         assert header == "file_name: notes.txt"
     # Where the upload was saved no longer changes how the text is chunked
     assert [n.text for n in nodes_a] == [n.text for n in nodes_b]
+
+
+def test_pdf_loads_as_text_one_document_per_page():
+    # llama-index-core reads PDFs only when llama-index-readers-file is installed;
+    # without it SimpleDirectoryReader silently loads the raw PDF bytes as text
+    pdf = str(Path(__file__).parent / "fixtures" / "two_pages.pdf")
+    documents = DocumentProcessor().load_documents([pdf])
+
+    assert [doc.metadata.get("page_label") for doc in documents] == ["1", "2"]
+    assert "Tides are caused by the pull of the Moon" in documents[0].text
+    assert "Bees make honey" in documents[1].text
+    assert all("%PDF" not in doc.text for doc in documents)
