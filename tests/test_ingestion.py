@@ -43,6 +43,7 @@ def test_config_reads_env(monkeypatch):
     monkeypatch.setenv("LLM_MODEL", "some-model")
     monkeypatch.setenv("EMBEDDING_MODEL", "some-embedding")
     monkeypatch.delenv("LLM_TEMPERATURE", raising=False)
+    monkeypatch.setenv("LLM_REASONING_EFFORT", "low")
 
     config = AppConfig.from_env()
 
@@ -50,10 +51,25 @@ def test_config_reads_env(monkeypatch):
     assert config.llm_model == "some-model"
     assert config.embedding_model == "some-embedding"
     assert config.llm_temperature == 0.0
+    assert config.llm_reasoning_effort == "low"
 
 
-def test_default_temperature_is_zero(tmp_path):
-    assert make_manager(tmp_path).llm.temperature == 0.0
+def test_default_llm_answers_without_reasoning(tmp_path):
+    llm = make_manager(tmp_path).llm
+    assert llm.model == AppConfig().llm_model == "claude-haiku-5-5"
+    assert llm.thinking_dict == {"type": "disabled"}
+    assert "temperature" not in llm._model_kwargs
+
+
+def test_openai_reasoning_model_answers_without_reasoning(tmp_path):
+    manager = IndexManager(persist_dir=str(tmp_path / "chroma"), collection_name="test", llm_model="gpt-6-luna")
+    assert manager.llm._get_model_kwargs()["reasoning_effort"] == "none"
+
+
+def test_older_models_keep_temperature_zero(tmp_path):
+    manager = IndexManager(persist_dir=str(tmp_path / "chroma"), collection_name="test", llm_model="gpt-4o-mini")
+    assert manager.llm.temperature == 0.0
+    assert "reasoning_effort" not in manager.llm._get_model_kwargs()
 
 
 def test_index_stores_exactly_the_processor_chunks(tmp_path, sample_file):
