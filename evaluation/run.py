@@ -183,39 +183,41 @@ def evaluate_faithfulness(
     examples = []
     # Token usage of the answer model only; the judge's calls happen outside recording()
     recorder = UsageRecorder().attach()
-    for i, query in enumerate(sample, start=1):
-        with recorder.recording() as calls:
-            started = time.perf_counter()
-            response = engine.query(query.question)
-            latency_ms = 1000 * (time.perf_counter() - started)
-        input_tokens = sum(c.input_tokens for c in calls)
-        output_tokens = sum(c.output_tokens for c in calls)
-        call_costs = [cost_usd(model, c) for c in calls]
-        contexts = [n.node.get_content() for n in response.source_nodes]
-        source_ids = [n.node.node_id for n in response.source_nodes]
-        result = judge_faithfulness(judge, query.question, response.response, contexts)
-        examples.append({
-            "query_id": query.query_id,
-            "question": query.question,
-            "gold_answers": list(query.answers),
-            "answer": response.response,
-            "source_chunk_ids": source_ids,
-            "context_has_answer": any(cid in relevant[query.query_id] for cid in source_ids),
-            "no_answer": is_no_answer(response.response),
-            "faithfulness": result.score,
-            "claims": result.claims,
-            "judge_invalid": result.invalid,
-            "answer_recall": answer_recall(response.response, query.answers),
-            "token_f1": token_f1(response.response, query.answers),
-            "latency_ms": latency_ms,
-            "llm_calls": len(calls),
-            "input_tokens": input_tokens,
-            "output_tokens": output_tokens,
-            "cost_usd": sum(call_costs) if calls and None not in call_costs else None,
-        })
-        print(f"  faithfulness {i}/{len(sample)}", end="\r", file=sys.stderr)
-
-    recorder.detach()
+    try:
+        for i, query in enumerate(sample, start=1):
+            with recorder.recording() as calls:
+                started = time.perf_counter()
+                response = engine.query(query.question)
+                latency_ms = 1000 * (time.perf_counter() - started)
+            input_tokens = sum(c.input_tokens for c in calls)
+            output_tokens = sum(c.output_tokens for c in calls)
+            call_costs = [cost_usd(model, c) for c in calls]
+            contexts = [n.node.get_content() for n in response.source_nodes]
+            source_ids = [n.node.node_id for n in response.source_nodes]
+            result = judge_faithfulness(judge, query.question, response.response, contexts)
+            examples.append({
+                "query_id": query.query_id,
+                "question": query.question,
+                "gold_answers": list(query.answers),
+                "answer": response.response,
+                "source_chunk_ids": source_ids,
+                "context_has_answer": any(cid in relevant[query.query_id] for cid in source_ids),
+                "no_answer": is_no_answer(response.response),
+                "faithfulness": result.score,
+                "claims": result.claims,
+                "judge_invalid": result.invalid,
+                "answer_recall": answer_recall(response.response, query.answers),
+                "token_f1": token_f1(response.response, query.answers),
+                "latency_ms": latency_ms,
+                "llm_calls": len(calls),
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "cost_usd": sum(call_costs) if calls and None not in call_costs else None,
+            })
+            print(f"  faithfulness {i}/{len(sample)}", end="\r", file=sys.stderr)
+    finally:
+        # The handler is global; detach it even when a call fails so it does not outlive the run
+        recorder.detach()
 
     scored = [e["faithfulness"] for e in examples if e["faithfulness"] is not None]
     latencies = sorted(e["latency_ms"] for e in examples)

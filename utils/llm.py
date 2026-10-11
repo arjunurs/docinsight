@@ -159,6 +159,8 @@ def usage_from_raw(raw: Any) -> Optional[CallUsage]:
     """
     Token usage from a provider response (OpenAI ChatCompletion or Anthropic Message).
     Output tokens include reasoning or thinking tokens, which both providers bill as output.
+    Cached input tokens are counted as plain input, so cost_usd is an uncached list-price
+    estimate (the app sets no cache breakpoints).
     """
     usage = _field(raw, "usage")
     if usage is None:
