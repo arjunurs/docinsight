@@ -7,10 +7,11 @@ either way, so switching the answer model never changes retrieval.
 """
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import re
-import threading
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterator, List, Optional
 
 from llama_index.core.base.llms.types import LLMMetadata
 from llama_index.core.instrumentation import get_dispatcher
@@ -188,13 +189,15 @@ class UsageRecorder(BaseEventHandler):
         with recorder.recording() as calls:
             engine.query(question)
         # calls: one CallUsage per LLM call
+
+    A recording is scoped to the current context (thread or asyncio task), so
+    concurrent queries, such as two Streamlit sessions, each see only their own calls.
     """
 
     def __init__(self, **kwargs: Any):
         super().__init__(**kwargs)
-        self._lock = threading.Lock()
-        self._calls: Optional[List[CallUsage]] = None
-        self._seen: List[Any] = []
+        # (calls, raw responses already counted) for the active recording, if any
+        self._scope: contextvars.ContextVar = contextvars.ContextVar(f"usage_scope_{id(self)}", default=None)
 
     @classmethod
     def class_name(cls) -> str:
@@ -203,38 +206,35 @@ class UsageRecorder(BaseEventHandler):
     def handle(self, event: Any, **kwargs: Any) -> None:
         if not isinstance(event, (LLMChatEndEvent, LLMCompletionEndEvent)):
             return
+        scope = self._scope.get()
         raw = _field(event.response, "raw")
-        with self._lock:
-            # A completion call on a chat model emits both events for the same response
-            if self._calls is None or raw is None or any(raw is seen for seen in self._seen):
-                return
-            usage = usage_from_raw(raw)
-            if usage is not None:
-                self._seen.append(raw)
-                self._calls.append(usage)
+        if scope is None or raw is None:
+            return
+        calls, seen = scope
+        # A completion call on a chat model emits both events for the same response
+        if any(raw is s for s in seen):
+            return
+        usage = usage_from_raw(raw)
+        if usage is not None:
+            seen.append(raw)
+            calls.append(usage)
 
-    def recording(self):
-        recorder = self
+    @contextlib.contextmanager
+    def recording(self) -> Iterator[List[CallUsage]]:
+        calls: List[CallUsage] = []
+        token = self._scope.set((calls, []))
+        try:
+            yield calls
+        finally:
+            self._scope.reset(token)
 
-        class _Scope:
-            def __enter__(self) -> List[CallUsage]:
-                with recorder._lock:
-                    recorder._calls, recorder._seen = [], []
-                return recorder._calls
-
-            def __exit__(self, *exc: Any) -> None:
-                with recorder._lock:
-                    recorder._calls = None
-
-        return _Scope()
-
+    # By identity: handlers are pydantic models, so two recorders compare equal with ==
     def attach(self) -> "UsageRecorder":
         dispatcher = get_dispatcher()
-        if self not in dispatcher.event_handlers:
+        if not any(handler is self for handler in dispatcher.event_handlers):
             dispatcher.add_event_handler(self)
         return self
 
     def detach(self) -> None:
         dispatcher = get_dispatcher()
-        if self in dispatcher.event_handlers:
-            dispatcher.event_handlers.remove(self)
+        dispatcher.event_handlers[:] = [handler for handler in dispatcher.event_handlers if handler is not self]

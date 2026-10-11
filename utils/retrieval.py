@@ -12,6 +12,8 @@ from llama_index.core.retrievers import BaseRetriever
 from llama_index.core.schema import BaseNode, MetadataMode, NodeWithScore
 from llama_index.core.vector_stores.utils import metadata_dict_to_node
 
+from utils.tracing import stage
+
 RRF_K = 60
 CANDIDATE_DEPTH = 50
 FUSION_MODES = ("score", "rrf")
@@ -114,6 +116,41 @@ def stored_dense_scores(collection, query_embedding: Sequence[float], ids: Seque
     }
 
 
+def embed_query(index: VectorStoreIndex, query_bundle: QueryBundle) -> None:
+    """
+    Embed the query into the bundle in its own traced stage, so the embedding API
+    call is timed apart from the vector search (which then reuses the embedding).
+    """
+    if query_bundle.embedding is not None or not query_bundle.embedding_strs:
+        return
+    # The index's own embed model, the one its retrievers would use
+    embed_model = index._embed_model
+    with stage("retrieval.embed_query", {"gen_ai.operation.name": "embeddings",
+                                         "gen_ai.request.model": getattr(embed_model, "model_name", None)}):
+        query_bundle.embedding = embed_model.get_agg_embedding_from_queries(query_bundle.embedding_strs)
+
+
+def dense_search(index: VectorStoreIndex, query_bundle: QueryBundle, top_k: int) -> List[NodeWithScore]:
+    """Vector search over the index, traced as two stages: embedding the query, then the search itself."""
+    embed_query(index, query_bundle)
+    with stage("retrieval.dense", {"docinsight.retrieval.top_k": top_k}) as span:
+        hits = index.as_retriever(similarity_top_k=top_k).retrieve(query_bundle)
+        span.set_attribute("docinsight.retrieval.hits", len(hits))
+    return hits
+
+
+class DenseRetriever(BaseRetriever):
+    """Vector search only (RETRIEVAL_MODE=dense), traced like the dense half of HybridRetriever."""
+
+    def __init__(self, index: VectorStoreIndex, similarity_top_k: int = 3):
+        super().__init__()
+        self.index = index
+        self.similarity_top_k = similarity_top_k
+
+    def _retrieve(self, query_bundle: QueryBundle) -> List[NodeWithScore]:
+        return dense_search(self.index, query_bundle, self.similarity_top_k)
+
+
 class BM25Index:
     """
     BM25 over a fixed list of chunk nodes, ranked by node id (or by the ids given).
@@ -205,27 +242,36 @@ class HybridRetriever(BaseRetriever):
 
     def _retrieve(self, query_bundle: QueryBundle) -> List[NodeWithScore]:
         depth = max(self.similarity_top_k, self.candidate_depth)
-        dense_hits = self.index.as_retriever(similarity_top_k=depth).retrieve(query_bundle)
-        bm25 = self._bm25_index()
+        dense_hits = dense_search(self.index, query_bundle, depth)
+        with stage("retrieval.bm25", {"docinsight.retrieval.top_k": depth}) as span:
+            previous = self._bm25
+            bm25 = self._bm25_index()
+            keyword_ids = bm25.rank(query_bundle.query_str, depth)
+            # Rebuilding BM25 after an upload is the one slow path here; flag it on the span
+            span.set_attribute("docinsight.bm25.rebuilt", bm25 is not previous)
+            span.set_attribute("docinsight.retrieval.hits", len(keyword_ids))
 
         nodes = {hit.node.node_id: hit.node for hit in dense_hits}
-        keyword_ids = bm25.rank(query_bundle.query_str, depth)
-        if self.fusion == "rrf":
-            rankings = [[hit.node.node_id for hit in dense_hits], keyword_ids]
-            scores = rrf_scores(rankings, self.rrf_k)
-            fused = reciprocal_rank_fusion(rankings, self.similarity_top_k, self.rrf_k)
-        else:
-            dense = {hit.node.node_id: chroma_score_to_dense(hit.score) for hit in dense_hits}
-            # Dense search embedded the query into the bundle; reuse it to score the
-            # chunks only BM25 found from their stored embeddings, so every candidate
-            # gets an exact dense score
-            if query_bundle.embedding is not None:
-                bm25_only = [cid for cid in keyword_ids if cid not in dense]
-                dense.update(stored_dense_scores(self.collection, query_bundle.embedding, bm25_only))
-            # Exact BM25 scores for every candidate, dense-only ones included
-            keyword = bm25.scores_for(query_bundle.query_str, list(dense) + keyword_ids)
-            scores = fused_scores(dense, keyword, self.dense_weight)
-            fused = sorted(scores, key=lambda cid: (-scores[cid], cid))[: self.similarity_top_k]
+        with stage("retrieval.fusion", {"docinsight.fusion.mode": self.fusion}) as span:
+            if self.fusion == "rrf":
+                rankings = [[hit.node.node_id for hit in dense_hits], keyword_ids]
+                scores = rrf_scores(rankings, self.rrf_k)
+                fused = reciprocal_rank_fusion(rankings, self.similarity_top_k, self.rrf_k)
+            else:
+                span.set_attribute("docinsight.fusion.dense_weight", self.dense_weight)
+                dense = {hit.node.node_id: chroma_score_to_dense(hit.score) for hit in dense_hits}
+                # Dense search embedded the query into the bundle; reuse it to score the
+                # chunks only BM25 found from their stored embeddings, so every candidate
+                # gets an exact dense score
+                if query_bundle.embedding is not None:
+                    bm25_only = [cid for cid in keyword_ids if cid not in dense]
+                    span.set_attribute("docinsight.fusion.bm25_only", len(bm25_only))
+                    dense.update(stored_dense_scores(self.collection, query_bundle.embedding, bm25_only))
+                # Exact BM25 scores for every candidate, dense-only ones included
+                keyword = bm25.scores_for(query_bundle.query_str, list(dense) + keyword_ids)
+                scores = fused_scores(dense, keyword, self.dense_weight)
+                fused = sorted(scores, key=lambda cid: (-scores[cid], cid))[: self.similarity_top_k]
+            span.set_attribute("docinsight.fusion.candidates", len(scores))
         return [
             NodeWithScore(node=nodes.get(node_id) or bm25.by_id[node_id], score=scores[node_id])
             for node_id in fused

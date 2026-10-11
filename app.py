@@ -14,6 +14,7 @@ from utils.index_manager import IndexManager
 from utils.llm import is_claude
 from utils.query_engine import QueryEngine
 from utils.reranking import build_reranker
+from utils.tracing import configure_tracing
 
 # Load environment variables
 load_dotenv()
@@ -33,6 +34,12 @@ The system uses LlamaIndex and the OpenAI API to provide relevant answers based 
 
 # Initialize session state
 config = AppConfig.from_env()
+# Exports a span per query stage when TRACING (or an OTLP endpoint) is set; off otherwise
+try:
+    configure_tracing()
+except ValueError as err:
+    st.error(str(err))
+    st.stop()
 # Claude answer models also need an Anthropic key (embeddings stay on OpenAI)
 if is_claude(config.llm_model) and os.getenv("ANTHROPIC_API_KEY") is None:
     st.error(f"LLM_MODEL={config.llm_model} needs ANTHROPIC_API_KEY in the .env file or the environment.")
@@ -120,7 +127,7 @@ query = st.text_input("Enter your question")
 if query and st.button("Ask"):
     if st.session_state.documents_processed:
         with st.spinner("Generating answer..."):
-            response = st.session_state.query_engine.query(query)
+            response, trace = st.session_state.query_engine.query_with_trace(query)
             
             if response:
                 st.subheader("Answer")
@@ -130,6 +137,18 @@ if query and st.button("Ask"):
                 for idx, source_node in enumerate(response.source_nodes, 1):
                     st.markdown(f"**Source {idx}**: {source_node.metadata.get('file_name', 'Unknown')}")
                     st.markdown(f"**Excerpt**: {source_node.text[:300]}...")
+
+                with st.expander("Latency and cost"):
+                    cost = "cost unknown" if trace.cost_usd is None else f"${trace.cost_usd:.5f}"
+                    st.markdown(
+                        f"**{trace.total_ms:,.0f} ms** total · {trace.input_tokens:,} input + "
+                        f"{trace.output_tokens:,} output tokens ({trace.model}) · {cost}"
+                    )
+                    st.table([
+                        {"stage": name, "ms": round(ms, 1)} for name, ms in trace.stages_ms.items()
+                    ])
+                    if trace.trace_id:
+                        st.caption(f"Trace ID {trace.trace_id}")
             else:
                 st.error("Failed to generate a response. Please make sure documents are processed.")
     else:

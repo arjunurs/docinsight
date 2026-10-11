@@ -17,6 +17,7 @@ A simple Retrieval Augmented Generation (RAG) application that allows users to u
 - **Streamlit**: Frontend framework for the user interface
 - **OpenAI API**: Embeddings (and answers, with an OpenAI `LLM_MODEL`)
 - **Claude API**: Answers, Claude Haiku 5.5 by default
+- **OpenTelemetry**: A span per query stage with latency, tokens and cost
 
 ## Implementation Details
 
@@ -332,6 +333,8 @@ All settings are optional environment variables, read at startup (see `.env.exam
 | `HYBRID_DENSE_WEIGHT` | 0.7 | Weight on dense in score fusion, 0 to 1; BM25 gets the rest |
 | `RERANKER` | off | `minilm` reranks the retrieved candidates with a cross-encoder before the top 3 go to the LLM. Optional extra, see [Optional reranker](#optional-reranker) |
 | `RERANK_CANDIDATES` | 10 | Chunks retrieved for the reranker to choose from |
+| `TRACING` | off | Export a span per query stage: `console` (stdout) or `otlp`. Unset means `otlp` when `OTEL_EXPORTER_OTLP_ENDPOINT` is set, otherwise off. See [Tracing and cost per query](#tracing-and-cost-per-query) |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | unset | OTLP/gRPC collector for `TRACING=otlp`, such as `http://localhost:4317`. The other standard `OTEL_*` variables (headers, `OTEL_SERVICE_NAME`) apply too |
 
 Changing `CHUNK_SIZE`, `CHUNK_OVERLAP` or `EMBEDDING_MODEL` only affects newly indexed documents; clear `data/chroma` to re-index everything.
 
@@ -363,6 +366,36 @@ Measured with `--retrievers rerank --reranker minilm` (recall@3, every evaluated
 | dense + reranker (`--rerank-base dense`) | 0.866 | 0.897 |
 
 These were measured on the RRF hybrid, before score fusion became the default. The reranker improves it on both datasets (+2.0 and +3.2 points) and lifts SQuAD answers through the app (context has the answer 0.87 to 0.93, answer recall 0.79 to 0.83, same 100 questions). No configuration wins both datasets: on NQ, dense alone stays best and reranking its candidates costs 2.1 points, likely because this MS MARCO-trained model handles NQ's tables and lists less well than the embeddings do. Larger rerankers did not help in a 2,000-question trial (MiniLM-L-12: same recall@3; bge-reranker-base: 0.814 on SQuAD). Raw output: [`evaluation/results/reranker.json`](evaluation/results/reranker.json).
+
+## Tracing and cost per query
+
+Every question is traced with OpenTelemetry, one span per stage, and the app shows the result under the answer ("Latency and cost"):
+
+```
+docinsight.query              total wall clock, answer tokens, $
+├── retrieval                 mode, candidates retrieved
+│   ├── retrieval.embed_query OpenAI embedding call
+│   ├── retrieval.dense       Chroma vector search
+│   ├── retrieval.bm25        BM25 ranking (flags a rebuild after an upload)
+│   └── retrieval.fusion      score fusion or RRF, chunks rescored from stored embeddings
+├── rerank                    only with RERANKER set
+└── llm.answer                model, input and output tokens, $
+```
+
+Token counts come from the provider's response (`usage`), and cost uses the list prices in [`utils/llm.py`](utils/llm.py), the same table the evaluation uses for cost per 1k queries. Attribute names follow the [OpenTelemetry GenAI semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/) where one exists (`gen_ai.request.model`, `gen_ai.usage.input_tokens`, ...), and everything else is under `docinsight.*`. The question text is left out of spans unless `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true`, as those conventions ask. Not counted: the query embedding (text-embedding-3-small at $0.02 per 1M tokens, about $0.0000002 per question) and the evaluation's judge model.
+
+Spans go nowhere until an exporter is configured, so tracing is free to leave in. The per-query summary is collected either way:
+
+```
+TRACING=console uv run streamlit run app.py          # print spans to the terminal
+
+docker-compose --profile tracing up -d               # app plus Jaeger (UI at http://localhost:16686)
+# with OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317 in .env
+```
+
+Any OTLP backend works the same way (Grafana Tempo, Honeycomb, Datadog, an OpenTelemetry Collector). Spans are exported from a background thread, so a slow or missing collector never delays an answer. Overhead measured with a no-op stage body: about 0.07 ms per query with tracing off and 0.3 ms with an exporter, against roughly a second for the answer call.
+
+The evaluation records the same trace for every answered question: `--faithfulness` output now includes each question's `stages_ms` and a `stage_ms_p50` summary, so a regression in one stage (say, BM25 after a corpus change) shows up next to the quality numbers.
 
 ## Running Tests
 

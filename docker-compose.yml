@@ -16,3 +16,13 @@ services:
     env_file:
       - .env
     restart: unless-stopped 
+  # Optional trace viewer: docker-compose --profile tracing up -d, with
+  # OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317 in .env. UI at http://localhost:16686
+  jaeger:
+    image: jaegertracing/jaeger:2.10.0
+    container_name: docinsight-jaeger
+    profiles: ["tracing"]
+    ports:
+      - "16686:16686"
+      - "4317:4317"
+    restart: unless-stopped
